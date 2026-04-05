@@ -1,66 +1,68 @@
 # ClawHarness
 
-ClawHarness 是一个面向 Azure DevOps 仓库的自主化任务到 PR 执行闭环。它把 Azure DevOps 工作项、OpenClaw ACP 执行、仓库本地校验、分支与 PR 自动化，以及可选的 Rocket.Chat 生命周期通知串成一条可重复的交付链路。
+English | [简体中文](README.zh-CN.md)
 
-## 功能概览
+ClawHarness is an autonomous task-to-PR execution harness for Azure DevOps repositories. It connects Azure DevOps work items, OpenClaw ACP execution, local repository verification, branch and PR automation, and optional Rocket.Chat lifecycle notifications into one repeatable delivery loop.
 
-- 使用基于 SQLite 的运行时存储完成任务认领、去重、加锁和审计
-- 为每次任务运行准备隔离工作区，并创建任务分支
-- 通过 OpenClaw ACP 调用 Codex 完成实现工作
-- 在提交和推送前执行本地检查
-- 自动创建 PR，并为每次运行保留审计记录
-- 支持通过 webhook 继续处理 PR 反馈和 CI 故障恢复
-- 提供 Windows、Linux systemd 和 Docker 部署资产
+## What It Does
 
-## 仓库结构
+- Uses a SQLite-backed runtime store for task claiming, deduplication, locking, and audit records
+- Prepares an isolated workspace for each task run and creates a task branch
+- Calls Codex through OpenClaw ACP to implement changes
+- Runs local checks before commit and push
+- Opens PRs automatically and keeps an audit trail for every run
+- Supports webhook-driven continuation for PR feedback and CI failure recovery
+- Ships deployment assets for Windows, Linux systemd, and Docker
 
-- `ado_client/`：Azure DevOps REST 客户端，负责工作项、仓库、PR 和构建操作
-- `codex_acp_runner/`：ACP 执行器封装与结构化结果处理
-- `harness_runtime/`：Bridge 服务、编排逻辑与运行时配置加载
-- `rocketchat_notifier/`：Rocket.Chat webhook 通知器
-- `run_store/`：SQLite schema 与运行态持久化原语
-- `openclaw-plugin/`：OpenClaw 插件入口、hooks、flows 与 skills
-- `deploy/`：Docker、systemd、Windows 以及配置模板
-- `.omx/plans/`：PRD、测试规范、PDCA 记录与验收证据
+## Repository Layout
 
-## 当前 V1 状态
+- `ado_client/`: Azure DevOps REST client for work items, repositories, PRs, and builds
+- `codex_acp_runner/`: ACP executor wrapper and structured result handling
+- `harness_runtime/`: bridge service, orchestration logic, and runtime config loading
+- `rocketchat_notifier/`: Rocket.Chat webhook notifier
+- `run_store/`: SQLite schema and runtime persistence primitives
+- `openclaw-plugin/`: OpenClaw plugin entry, hooks, flows, and skills
+- `deploy/`: Docker, systemd, Windows, and config assets
+- `.omx/plans/`: PRD, test spec, PDCA records, and validation evidence
 
-- V1 主 happy path 已在 Azure DevOps 和 OpenClaw ACP 上完成真实环境验证
-- 任务到分支到 PR 的真实闭环已完成
-- PR 反馈恢复链路也已经完成真实环境验证
-- 证据与 PDCA 记录保存在 `.omx/plans/`
+## Current V1 Status
 
-## 快速开始
+- The V1 happy path has been live-validated on Azure DevOps and OpenClaw ACP
+- The real task-to-branch-to-PR loop is complete
+- The PR feedback recovery loop has also been live-validated
+- Evidence and PDCA records are stored under `.omx/plans/`
 
-1. 配置必需环境变量，例如 `ADO_BASE_URL`、`ADO_PROJECT`、`ADO_PAT`、`OPENCLAW_HOOKS_TOKEN`、`OPENCLAW_GATEWAY_TOKEN`。
-2. 阅读 [deploy/README.md](/D:/Repos/claw_az/deploy/README.md) 选择部署方式。
-3. 按目标环境运行 Windows 安装脚本，或者使用 Docker / systemd 资产。
-4. 运行自动化检查：
+## Quick Start
+
+1. Configure the required environment variables such as `ADO_BASE_URL`, `ADO_PROJECT`, `ADO_PAT`, `OPENCLAW_HOOKS_TOKEN`, and `OPENCLAW_GATEWAY_TOKEN`.
+2. Review deployment options in `deploy/README.md`.
+3. Run the Windows installer scripts or use the Docker/systemd assets for your target environment.
+4. Run the automated checks:
 
 ```sh
 python -m unittest discover -s tests -v
 python -m compileall ado_client codex_acp_runner harness_runtime rocketchat_notifier run_store tests
 ```
 
-5. 手工触发一次任务运行：
+5. Trigger a manual task run:
 
 ```sh
 python -m harness_runtime.main --task-id <work-item-id> --repo-id <repo-id>
 ```
 
-## 验证说明
+## Validation Notes
 
-当前实现已经最稳定地覆盖以下 V1 主链路：
+The current implementation is strongest on the core V1 loop:
 
-- 任务认领与去重
-- ACP 执行
-- 本地检查门禁
-- 分支推送
-- PR 创建
-- PR 反馈后的同一运行闭环续跑
+- task claim and dedupe
+- ACP execution
+- local check gate
+- branch push
+- PR creation
+- same-run continuation after PR feedback
 
-当前仍需要补齐更广泛真实环境验证的部分主要是：
+The main remaining gaps that still need broader live validation are:
 
-- 真实 CI 失败后的恢复与重试
-- 受保护分支和评审策略更严格的仓库策略联动
-- Docker / Linux 原生部署的更广覆盖验证
+- CI failure recovery and retry in a real build-backed project
+- policy interaction in repositories with stricter protected-branch and review rules
+- broader Docker and Linux native deployment validation
