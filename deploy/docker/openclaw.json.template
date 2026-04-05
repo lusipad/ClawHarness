@@ -1,0 +1,49 @@
+{
+  "gatewayBaseUrl": "${OPENCLAW_GATEWAY_BASE_URL}",
+  "gatewayToken": "${OPENCLAW_GATEWAY_TOKEN}",
+  "hooks": {
+    "enabled": true,
+    "token": "${OPENCLAW_HOOKS_TOKEN}",
+    "path": "/hooks",
+    "defaultAgentId": "hooks",
+    "defaultSessionKey": "hook:harness",
+    "wakeMode": "now",
+    "owner": "harness-bridge",
+    "ingressToken": "${HARNESS_INGRESS_TOKEN}"
+  },
+  "acp": {
+    "enabled": true,
+    "dispatch": {
+      "enabled": true
+    },
+    "backend": "acpx",
+    "defaultAgent": "codex",
+    "allowedAgents": [
+      "codex"
+    ],
+    "maxConcurrentSessions": 8,
+    "stream": {
+      "coalesceIdleMs": 300,
+      "maxChunkChars": 1200
+    },
+    "runtime": {
+      "ttlMinutes": 120
+    }
+  },
+  "agents": {
+    "list": [
+      {
+        "id": "codex",
+        "runtime": {
+          "type": "acp",
+          "acp": {
+            "agent": "codex",
+            "backend": "acpx",
+            "mode": "persistent",
+            "cwd": "${OPENCLAW_AGENT_CWD}"
+          }
+        }
+      }
+    ]
+  }
+}

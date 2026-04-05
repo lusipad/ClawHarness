@@ -1,0 +1,9 @@
+.git
+.omx
+__pycache__
+*.pyc
+*.pyo
+.data
+deploy/docker/.data
+deploy/docker/.env
+openclaw-plugin/node_modules

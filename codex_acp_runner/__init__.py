@@ -1,6 +1,7 @@
 from .runner import (
     AcpSpawnResult,
     CodexAcpRunner,
+    CodexCliRunner,
     ExecutorRequest,
     ExecutorRunError,
     ExecutorRunOutcome,
@@ -10,6 +11,7 @@ from .runner import (
 __all__ = [
     "AcpSpawnResult",
     "CodexAcpRunner",
+    "CodexCliRunner",
     "ExecutorRequest",
     "ExecutorRunError",
     "ExecutorRunOutcome",

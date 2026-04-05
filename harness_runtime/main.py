@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from ado_client import AzureDevOpsRestClient
-from codex_acp_runner import CodexAcpRunner
+from codex_acp_runner import CodexAcpRunner, CodexCliRunner
 from rocketchat_notifier import RocketChatNotifier
 from run_store import RunStore
 
@@ -63,13 +64,17 @@ def main() -> int:
             default_channel=config.rocketchat.channel,
         )
 
-    executor_runner = CodexAcpRunner(
-        lambda payload: gateway_tool_client.invoke_tool(
-            tool="sessions_spawn",
-            action="session_spawn",
-            args=payload,
+    executor_backend = os.environ.get("HARNESS_EXECUTOR_BACKEND", "").strip().lower()
+    if executor_backend == "codex-cli":
+        executor_runner = CodexCliRunner()
+    else:
+        executor_runner = CodexAcpRunner(
+            lambda payload: gateway_tool_client.invoke_tool(
+                tool="sessions_spawn",
+                action="session_spawn",
+                args=payload,
+            )
         )
-    )
 
     if args.task_id:
         if not args.repo_id:

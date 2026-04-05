@@ -10,6 +10,7 @@ deploy/rocketchat-local/data/
 .omx/state/
 
 .data/
+dist/
 .env
 .env.*
 !.env.example

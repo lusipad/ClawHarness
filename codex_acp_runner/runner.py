@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -8,6 +9,10 @@ from typing import Any, Callable, Mapping
 
 
 SpawnSession = Callable[[dict[str, Any]], Mapping[str, Any]]
+CliShellRunner = Callable[
+    [list[str], str | Path | None, Mapping[str, str] | None, float | None],
+    subprocess.CompletedProcess[str],
+]
 
 
 @dataclass(frozen=True)
@@ -72,43 +77,58 @@ class ExecutorRunOutcome:
     result: ExecutorResult
 
 
+def _build_task_prompt(request: ExecutorRequest) -> str:
+    request.validate()
+    sections = [
+        request.task_prompt.strip(),
+        "",
+        "Constraints:",
+    ]
+    if request.constraints:
+        sections.extend(f"- {constraint}" for constraint in request.constraints)
+    else:
+        sections.append("- none")
+
+    sections.extend(
+        [
+            "",
+            "Artifacts:",
+            "```json",
+            json.dumps(request.artifacts, indent=2, sort_keys=True),
+            "```",
+        ]
+    )
+    result_path = request.artifacts.get("result_path")
+    if isinstance(result_path, str) and result_path:
+        sections.extend(
+            [
+                "",
+                "Execution contract:",
+                f"- Write a JSON result artifact to `{result_path}`.",
+                '- Required keys: "status", "summary", "changed_files", "checks", "follow_up".',
+                "- Use absolute or workspace-relative changed file paths.",
+            ]
+        )
+    return "\n".join(sections)
+
+
+def _load_result(result_path: str | Path) -> ExecutorResult:
+    path = Path(result_path)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ExecutorRunError(f"Failed to read executor result: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise ExecutorRunError(f"Failed to parse executor result JSON: {path}") from exc
+    return ExecutorResult.from_mapping(payload)
+
+
 class CodexAcpRunner:
     def __init__(self, spawn_session: SpawnSession):
         self.spawn_session = spawn_session
 
     def build_task_prompt(self, request: ExecutorRequest) -> str:
-        request.validate()
-        sections = [
-            request.task_prompt.strip(),
-            "",
-            "Constraints:",
-        ]
-        if request.constraints:
-            sections.extend(f"- {constraint}" for constraint in request.constraints)
-        else:
-            sections.append("- none")
-
-        sections.extend(
-            [
-                "",
-                "Artifacts:",
-                "```json",
-                json.dumps(request.artifacts, indent=2, sort_keys=True),
-                "```",
-            ]
-        )
-        result_path = request.artifacts.get("result_path")
-        if isinstance(result_path, str) and result_path:
-            sections.extend(
-                [
-                    "",
-                    "Execution contract:",
-                    f"- Write a JSON result artifact to `{result_path}`.",
-                    '- Required keys: "status", "summary", "changed_files", "checks", "follow_up".',
-                    "- Use absolute or workspace-relative changed file paths.",
-                ]
-            )
-        return "\n".join(sections)
+        return _build_task_prompt(request)
 
     def build_spawn_payload(self, request: ExecutorRequest, *, resume_session_id: str | None = None) -> dict[str, Any]:
         prompt = self.build_task_prompt(request)
@@ -140,14 +160,7 @@ class CodexAcpRunner:
         return self._to_spawn_result(response)
 
     def load_result(self, result_path: str | Path) -> ExecutorResult:
-        path = Path(result_path)
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except OSError as exc:
-            raise ExecutorRunError(f"Failed to read executor result: {path}") from exc
-        except json.JSONDecodeError as exc:
-            raise ExecutorRunError(f"Failed to parse executor result JSON: {path}") from exc
-        return ExecutorResult.from_mapping(payload)
+        return _load_result(result_path)
 
     def wait_for_result(
         self,
@@ -215,3 +228,104 @@ class CodexAcpRunner:
 
     def dump_request(self, request: ExecutorRequest) -> dict[str, Any]:
         return asdict(request)
+
+
+class CodexCliRunner:
+    def __init__(
+        self,
+        *,
+        codex_command: str = "codex",
+        shell_runner: CliShellRunner | None = None,
+    ):
+        self.codex_command = codex_command
+        self.shell_runner = shell_runner or self._default_shell_runner
+
+    def build_task_prompt(self, request: ExecutorRequest) -> str:
+        return _build_task_prompt(request)
+
+    def build_exec_command(self, request: ExecutorRequest, *, result_path: str | Path) -> list[str]:
+        prompt = self.build_task_prompt(request)
+        last_message_path = str(Path(result_path).with_suffix(".last-message.txt"))
+        return [
+            self.codex_command,
+            "exec",
+            "--skip-git-repo-check",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--color",
+            "never",
+            "--cd",
+            request.workspace_path,
+            "--output-last-message",
+            last_message_path,
+            prompt,
+        ]
+
+    def run_and_wait(
+        self,
+        request: ExecutorRequest,
+        *,
+        result_path: str | Path,
+        timeout_seconds: float,
+        poll_interval_seconds: float = 1.0,
+        resume_session_id: str | None = None,
+    ) -> ExecutorRunOutcome:
+        del poll_interval_seconds
+        request.validate()
+        command = self.build_exec_command(request, result_path=result_path)
+        completed = self.shell_runner(
+            command,
+            request.workspace_path,
+            {"GIT_TERMINAL_PROMPT": "0"},
+            timeout_seconds,
+        )
+        result_file = Path(result_path)
+        if result_file.exists():
+            return ExecutorRunOutcome(
+                spawn=AcpSpawnResult(
+                    accepted=True,
+                    child_session_key=None,
+                    session_id=resume_session_id or f"codex-cli:{int(time.time())}",
+                    raw={"command": command, "exit_code": completed.returncode},
+                ),
+                result=_load_result(result_file),
+            )
+
+        if completed.returncode != 0:
+            raise ExecutorRunError(self._format_failure(command, completed))
+        raise ExecutorRunError(f"Codex exec completed without writing result artifact: {result_file}")
+
+    def _format_failure(self, command: list[str], completed: subprocess.CompletedProcess[str]) -> str:
+        stderr = (completed.stderr or "").strip()
+        stdout = (completed.stdout or "").strip()
+        excerpt = stderr or stdout or "unknown error"
+        if len(excerpt) > 2000:
+            excerpt = excerpt[:2000] + "...<truncated>"
+        return f"Codex exec failed ({completed.returncode}): {' '.join(command)} | {excerpt}"
+
+    def _default_shell_runner(
+        self,
+        command: list[str],
+        cwd: str | Path | None,
+        env_overrides: Mapping[str, str] | None,
+        timeout_seconds: float | None,
+    ) -> subprocess.CompletedProcess[str]:
+        env = dict(**env_overrides) if env_overrides else None
+        merged_env = None
+        if env is not None:
+            merged_env = dict(**env)
+            merged_env = {**merged_env}
+        base_env = None
+        if merged_env is not None:
+            import os
+
+            base_env = os.environ.copy()
+            base_env.update(merged_env)
+        return subprocess.run(
+            command,
+            cwd=str(cwd) if cwd is not None else None,
+            env=base_env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout_seconds,
+        )

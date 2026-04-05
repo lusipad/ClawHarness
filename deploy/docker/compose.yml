@@ -1,36 +1,91 @@
 services:
   openclaw-gateway:
-    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/openclaw-gateway.Dockerfile
+      args:
+        OPENCLAW_IMAGE: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
+        CODEX_CLI_VERSION: ${CODEX_CLI_VERSION:-0.118.0}
+    image: clawharness/openclaw-gateway:local
     container_name: openclaw-gateway
     restart: unless-stopped
     ports:
-      - "18789:18789"
+      - "${OPENCLAW_GATEWAY_PUBLISH_ADDR:-127.0.0.1}:18789:18789"
     environment:
-      OPENCLAW_CONFIG_PATH: /var/lib/openclaw/openclaw.json
+      HOME: /home/node
+      CODEX_HOME: /home/node/.codex
+      OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+      OPENCLAW_FORCE_RENDER_CONFIG: ${OPENCLAW_FORCE_RENDER_CONFIG:-0}
+      OPENCLAW_GATEWAY_BASE_URL: ${OPENCLAW_GATEWAY_BASE_URL:-http://openclaw-gateway:18789}
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+      OPENCLAW_HOOKS_TOKEN: ${OPENCLAW_HOOKS_TOKEN}
+      HARNESS_INGRESS_TOKEN: ${HARNESS_INGRESS_TOKEN}
+      OPENCLAW_AGENT_CWD: ${OPENCLAW_AGENT_CWD:-/home/node/.openclaw/workspace/harness}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      CODEX_MODEL: ${CODEX_MODEL:-gpt-5.4}
+      CODEX_REVIEW_MODEL: ${CODEX_REVIEW_MODEL:-}
+      CODEX_REASONING_EFFORT: ${CODEX_REASONING_EFFORT:-}
     volumes:
-      - ${OPENCLAW_DATA_DIR:-./.data/openclaw}:/var/lib/openclaw
-      - ${OPENCLAW_WORKSPACE_DIR:-./.data/workspace}:/var/lib/openclaw/workspace
-      - ../../openclaw-plugin:/var/lib/openclaw/plugins/clawharness:ro
+      - ${OPENCLAW_DATA_DIR:-./.data/openclaw}:/home/node/.openclaw
+      - ${CODEX_HOME_DIR:-./.data/codex}:/home/node/.codex
+      - ${OPENCLAW_WORKSPACE_DIR:-./.data/workspace/harness}:/home/node/.openclaw/workspace/harness
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:18789/healthz', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
 
   harness-bridge:
     build:
       context: ../..
       dockerfile: deploy/docker/harness-bridge.Dockerfile
+      args:
+        CODEX_CLI_VERSION: ${CODEX_CLI_VERSION:-0.118.0}
+    image: clawharness/harness-bridge:local
     container_name: clawharness-bridge
     restart: unless-stopped
     depends_on:
-      - openclaw-gateway
+      openclaw-gateway:
+        condition: service_healthy
     ports:
-      - "8080:8080"
+      - "${HARNESS_BRIDGE_PUBLISH_ADDR:-127.0.0.1}:8080:8080"
     environment:
+      HOME: /home/node
+      CODEX_HOME: /home/node/.codex
+      ADO_BASE_URL: ${ADO_BASE_URL}
+      ADO_PROJECT: ${ADO_PROJECT}
       ADO_PAT: ${ADO_PAT}
       ADO_WEBHOOK_SECRET: ${ADO_WEBHOOK_SECRET}
       RC_WEBHOOK_URL: ${RC_WEBHOOK_URL}
-      OPENCLAW_HOOKS_TOKEN: ${OPENCLAW_HOOKS_TOKEN}
+      OPENCLAW_GATEWAY_BASE_URL: ${OPENCLAW_GATEWAY_BASE_URL:-http://openclaw-gateway:18789}
       HARNESS_INGRESS_TOKEN: ${HARNESS_INGRESS_TOKEN}
+      HARNESS_EXECUTOR_BACKEND: ${HARNESS_EXECUTOR_BACKEND:-codex-cli}
     volumes:
-      - ${HARNESS_DATA_DIR:-./.data/harness}:/root/.openclaw/harness
+      - ${HARNESS_DATA_DIR:-./.data/harness}:/home/node/.openclaw/harness
+      - ${OPENCLAW_DATA_DIR:-./.data/openclaw}:/home/node/.openclaw-gateway:ro
+      - ${CODEX_HOME_DIR:-./.data/codex}:/home/node/.codex
+      - ${OPENCLAW_WORKSPACE_DIR:-./.data/workspace/harness}:/home/node/.openclaw/workspace/harness
       - ../config:/app/deploy/config:ro
+    command:
+      - sh
+      - -lc
+      - >
+        python /app/deploy/docker/render_openclaw_config.py
+        --gateway-config /home/node/.openclaw-gateway/openclaw.json
+        --output /tmp/openclaw.json &&
+        python -m harness_runtime.main
+        --bind 0.0.0.0
+        --port 8080
+        --providers-config /app/deploy/config/providers.yaml
+        --policy-config /app/deploy/config/harness-policy.yaml
+        --openclaw-config /tmp/openclaw.json
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz').read()"]
       interval: 30s
