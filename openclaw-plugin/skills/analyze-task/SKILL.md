@@ -1,29 +1,29 @@
 ---
 name: analyze-task
-description: Analyze a normalized Azure DevOps task and prepare a structured execution plan for the harness flow.
+description: 分析归一化后的 Azure DevOps 任务，并为 harness flow 生成结构化执行计划。
 ---
 
 # analyze-task
 
-## Purpose
+## 用途
 
-Read the normalized task payload, identify impacted files or modules, surface missing information, and produce a plan that `implement-task` can execute.
+读取归一化任务载荷，识别受影响的文件或模块，暴露缺失信息，并生成可供 `implement-task` 执行的计划。
 
-## Inputs
+## 输入
 
-- normalized task metadata
-- full task body
-- repository context
+- 归一化任务元数据
+- 完整任务正文
+- 仓库上下文
 
-## Required Output
+## 必要输出
 
-- structured execution plan
-- impacted files or modules
-- missing information list
-- risk level
+- 结构化执行计划
+- 受影响文件或模块
+- 缺失信息列表
+- 风险等级
 
-## Guardrails
+## 约束
 
-- stay within the existing repository patterns
-- do not skip missing-information reporting
-- do not claim implementation is ready unless the plan is specific enough to execute
+- 保持与仓库现有模式一致
+- 不得跳过缺失信息报告
+- 只有计划细化到可执行程度时，才可以声称实现已准备就绪

@@ -1,214 +1,155 @@
-# ClawHarness Master Plan
+# ClawHarness 总体主计划
 
-Date: 2026-04-05
-Status: Canonical integrated plan
-Supersedes:
+日期：2026-04-05
+状态：统一主计划
+替代：
 - `.omx/plans/clawharness-architecture-2026-04-05.md`
 - `.omx/plans/clawharness-mvp-technical-design-2026-04-05.md`
 - `.omx/plans/clawharness-support-matrix-2026-04-05.md`
 
-## Goal
+## 目标
 
-Build an internal AI software harness that:
+构建一个内部 AI 软件交付 Harness，满足以下闭环：
 
-- takes work from Azure DevOps
-- lets OpenClaw analyze and plan the work
-- uses Codex through ACP to make code changes
-- opens a PR
-- reacts to PR comments and CI failures
-- sends status updates to Rocket.Chat
-- can be deployed with Docker or without Docker
+- 从 Azure DevOps 接收工作项
+- 由 OpenClaw 完成分析与规划
+- 通过 ACP 调用 Codex 实施代码修改
+- 自动创建分支与 PR
+- 对 PR 评论与 CI 失败做后续恢复
+- 向 Rocket.Chat 发送状态通知
+- 支持 Docker 和非 Docker 原生部署
 
-## KISS Decisions
+## V1 固定决策
 
-These decisions are fixed for v1.
+以下决策在 V1 阶段视为锁定，除非后续 ADR 显式替代：
 
-- `OpenClaw` is the center.
-- `Codex` is used through existing `ACP` support.
-- `Azure DevOps` integration starts with `REST`, not MCP.
-- `Rocket.Chat` starts with `webhook notifications`, not a full chat bridge.
-- `SQLite` is the only runtime store in v1.
-- One `OpenClaw Gateway` instance is enough for v1.
-- One workspace is created per task run.
-- No auto-merge in v1.
-- No multi-provider runtime in v1.
-- No heavy external orchestrator in v1.
+- `OpenClaw` 是控制中心
+- `Codex` 通过现成的 `ACP` 集成，不引入自定义执行协议
+- Azure DevOps 集成先从 `REST` 起步，不把 MCP 作为前置
+- Rocket.Chat 先采用 `webhook 通知模式`，不引入完整聊天桥接
+- 运行时存储只使用 `SQLite`
+- V1 只需要一个 `OpenClaw Gateway`
+- 每个任务运行创建一个独立工作区
+- V1 不做自动合并
+- V1 不做多供应商运行时
+- V1 不引入笨重的外部编排器
 
-## What We Are Not Building
+## 不做的内容
 
-- a new general-purpose agent platform
-- a full provider marketplace
-- a complex workflow engine outside OpenClaw
-- a second chat abstraction layer
-- a second executor abstraction layer beyond what ACP already gives us
-- separate flows for Azure DevOps Services and Azure DevOps Server
+- 新的通用 Agent 平台
+- 完整的供应商市场
+- 脱离 OpenClaw 的复杂工作流引擎
+- 第二套聊天抽象层
+- 超出 ACP 既有能力的第二套执行器抽象
+- Azure DevOps Services 与 Azure DevOps Server 的双分支流程体系
 
-## Final Shape
+## 最终形态
 
 ```text
 Azure DevOps
-  -> webhook or poll
-  -> OpenClaw hook
+  -> webhook 或 polling
+  -> OpenClaw hook / bridge
   -> task-run flow
   -> OpenClaw planning
   -> Codex via ACP
   -> git push + PR
-  -> Rocket.Chat webhook notify
+  -> Rocket.Chat webhook 通知
 ```
 
-If OpenClaw's installed webhook/hook surface is enough, everything stays inside the plugin bundle.
+如果当前安装的 OpenClaw hook 面足够，就全部放在插件包内完成。
+如果不足，则只补一个很小的 companion process，用于：
 
-If it is not enough, add one tiny companion process only for:
+- 接收 webhook
+- 写入 SQLite
+- 唤醒 OpenClaw
 
-- receiving webhooks
-- writing to SQLite
-- waking OpenClaw
+这个 companion process 不是完整编排器。
 
-That process is not a full orchestrator.
-
-## Core Components
+## 核心组件
 
 ### 1. OpenClaw
 
-OpenClaw owns:
+OpenClaw 负责：
 
-- sessions
-- planning
+- 会话
+- 规划
 - flows
 - hooks
-- task continuation
-- executor dispatch through ACP
+- 任务续跑
+- 通过 ACP 分发执行
 
-OpenClaw does not replace Azure DevOps as the source of truth for tasks, PRs, or CI.
+### 2. run_store
 
-### 2. Codex via ACP
+运行时状态中心，负责：
 
-Codex is the coding worker.
+- 任务认领
+- 去重
+- 锁
+- 运行状态迁移
+- run 映射
+- 审计链路
 
-OpenClaw decides when to call it.
-ACP is already the transport. We do not build a custom Codex protocol.
+### 3. ado_client
 
-### 3. Azure DevOps client
+Azure DevOps 适配层，负责：
 
-This is a small concrete module, not a generic provider framework.
+- 工作项读取与更新
+- 仓库信息与工作区准备
+- 分支创建
+- 提交与推送
+- PR 创建、查询、评论读取与回复
+- Build 查询与重试
+- 事件归一化
 
-It handles:
+### 4. codex_acp_runner
 
-- get task
-- update task
-- add task comment
-- create branch if needed
-- push branch
-- create PR
-- read PR comments
-- read CI status
-- retry CI if allowed
+ACP 执行封装层，负责：
 
-Support rule:
+- 把任务转成 ACP 请求
+- 接收结构化执行结果
+- 为任务主链路和恢复链路提供统一执行契约
 
-- `Azure DevOps REST` first
-- later optionally add `MCP` behind the same call sites if it proves useful
+### 5. rocketchat_notifier
 
-### 4. Rocket.Chat notifier
+通知层，负责：
 
-This is a small notifier module.
+- 任务开始
+- PR 创建
+- CI 失败
+- 任务阻塞
+- 任务完成
 
-It handles:
+## 核心流程
 
-- post task started
-- post PR opened
-- post CI failed
-- post task completed
-- post task blocked
+### task-run
 
-It does not need to be conversational in v1.
+1. 接收 Azure DevOps 任务事件
+2. 归一化事件并尝试认领
+3. 准备仓库工作区
+4. 创建任务分支
+5. 调用 ACP 执行任务
+6. 执行本地检查
+7. 提交、推送并创建 PR
+8. 记录审计并发送通知
 
-### 5. Runtime store
+### pr-feedback
 
-Use `SQLite`.
+1. 由 `pr_id` 找回同一 `run_id`
+2. 拉取未解决评审评论
+3. 在同一工作区和分支上下文中继续修复
+4. 执行本地检查
+5. 更新分支并回帖
+6. 将运行状态恢复到 `awaiting_review`
 
-It stores:
+### ci-recovery
 
-- runs
-- locks
-- dedupe fingerprints
-- PR mapping
-- CI mapping
-- chat thread mapping if needed later
-- audit events
+1. 由 `ci_run_id` 找回同一 `run_id`
+2. 读取失败构建摘要
+3. 判断是可自动恢复还是应升级人工
+4. 可恢复时修补、检查、推送并重试
+5. 不可恢复时转 `awaiting_human`
 
-## Minimal Modules
-
-Do not build more modules than these until duplication appears.
-
-```text
-harness/
-  openclaw-plugin/
-    flows/
-    hooks/
-    skills/
-    runtime/
-  ado_client/
-  codex_acp_runner/
-  rocketchat_notifier/
-  run_store/
-  deploy/
-```
-
-Concrete responsibility split:
-
-- `ado_client`
-  - only Azure DevOps REST calls
-- `codex_acp_runner`
-  - only Codex execution through OpenClaw ACP
-- `rocketchat_notifier`
-  - only Rocket.Chat notifications
-- `run_store`
-  - only SQLite persistence and locks
-- `openclaw-plugin`
-  - flows, hooks, skills, and composition
-
-## Main Flow
-
-### Task to PR
-
-1. Azure DevOps emits a task event or a poller finds an eligible task.
-2. The task is normalized into a run record.
-3. A lock is acquired for that task.
-4. OpenClaw starts or resumes a session for the run.
-5. OpenClaw runs `analyze-task`.
-6. OpenClaw prepares the workspace.
-7. OpenClaw calls Codex through ACP.
-8. Checks run.
-9. Branch is pushed.
-10. PR is created.
-11. Rocket.Chat gets a notification.
-12. Run status becomes `awaiting_ci` or `awaiting_review`.
-
-### PR Feedback
-
-1. PR comment event arrives.
-2. PR is mapped back to the run.
-3. OpenClaw resumes the same session.
-4. OpenClaw runs `fix-pr-feedback`.
-5. Codex makes the patch.
-6. Checks rerun.
-7. Update is pushed.
-8. Rocket.Chat gets a notification.
-
-### CI Failure
-
-1. CI failure event arrives.
-2. CI run is mapped back to the task run.
-3. OpenClaw reads the failure summary.
-4. OpenClaw decides:
-   - patch and retry
-   - or block and hand off to human
-5. Rocket.Chat gets a notification.
-
-## Statuses
-
-Keep the status list short.
+## 运行状态
 
 - `queued`
 - `claimed`
@@ -222,205 +163,39 @@ Keep the status list short.
 - `failed`
 - `cancelled`
 
-Add more only if a real workflow needs them.
+## V1 验收闭环
 
-## Data We Need
+V1 以以下验收点为准：
 
-Only store what is necessary to resume work.
+- AC-01 单任务认领与去重
+- AC-02 结构化规划输出
+- AC-03 ACP 编码执行
+- AC-04 PR 前检查门禁
+- AC-05 分支推送与 PR 创建
+- AC-06 PR 反馈恢复
+- AC-07 CI 失败恢复
+- AC-08 Rocket.Chat 生命周期通知
+- AC-09 Docker 部署支持
+- AC-10 原生部署支持
+- AC-11 工作流稳定性规则
+- AC-12 安全与策略护栏
+- AC-13 可观测性与审计
 
-### `task_runs`
+## 实施顺序
 
-- `run_id`
-- `task_id`
-- `task_key`
-- `repo_id`
-- `workspace_path`
-- `branch_name`
-- `pr_id`
-- `ci_run_id`
-- `session_id`
-- `status`
-- `retry_count`
-- `last_error`
-- `started_at`
-- `updated_at`
+1. 运行时存储与状态机
+2. Azure DevOps Provider 基线
+3. ACP 执行契约
+4. 主 task-run 流程
+5. PR/CI 恢复流程
+6. 通知与部署
+7. 审计、策略与收口
 
-### `task_locks`
+## 当前结论
 
-- `lock_key`
-- `run_id`
-- `acquired_at`
-- `expires_at`
+截至 `2026-04-05`：
 
-### `event_dedupe`
-
-- `fingerprint`
-- `source_type`
-- `source_id`
-- `received_at`
-- `expires_at`
-
-### `run_audit`
-
-- `run_id`
-- `event_type`
-- `payload_json`
-- `created_at`
-
-## Skills We Actually Need
-
-Only create these four first:
-
-- `analyze-task`
-- `implement-task`
-- `fix-pr-feedback`
-- `recover-ci-failure`
-
-Keep skill names business-oriented.
-
-Do not create vendor-specific shared skills like:
-
-- `ado-create-pr`
-- `codex-run`
-- `rocketchat-send`
-
-Those belong inside modules, not in reusable flow definitions.
-
-## Config
-
-Keep config external and small.
-
-Suggested files:
-
-```text
-deploy/config/openclaw.json
-deploy/config/providers.yaml
-deploy/config/harness-policy.yaml
-```
-
-Minimal `providers.yaml`:
-
-```yaml
-azure_devops:
-  base_url: https://ado.internal.local
-  project: MyProject
-  auth_env: ADO_PAT
-
-rocketchat:
-  webhook_url_env: RC_WEBHOOK_URL
-
-codex:
-  harness: codex
-  backend: acpx
-  mode: persistent
-
-runtime:
-  sqlite_path: ~/.openclaw/harness/harness.db
-  workspace_root: ~/.openclaw/workspace/harness
-  branch_prefix: ai
-  lock_ttl_seconds: 1800
-```
-
-If Azure DevOps Services later uses MCP, add it as one config flag in the Azure DevOps module. Do not redesign the system for it now.
-
-## Deployment
-
-### Docker
-
-Support this first because it is the fastest to roll out.
-
-Services:
-
-- `openclaw`
-- optional `bridge` only if webhook handling cannot stay in-plugin
-- optional `bot-review`
-- optional `rocketchat`
-
-Keep Azure DevOps Server outside the compose stack.
-
-### Non-Docker
-
-Support this in parallel.
-
-- OpenClaw as a native install
-- plugin bundle installed from a local artifact
-- optional bridge as a small service
-- SQLite on local disk
-
-Use:
-
-- `systemd` on Linux
-- a Windows service wrapper on Windows
-
-## Security Rules
-
-Keep them simple and hard.
-
-- no direct push to protected branches
-- PR creation allowed
-- merge denied in v1
-- one workspace per run
-- separate service tokens for ADO and Rocket.Chat
-- restrict admin UI to operators
-- keep OpenClaw session storage private
-
-## Observability
-
-Minimum signals only:
-
-- runs started
-- runs completed
-- runs failed
-- average time to PR
-- CI recovery count
-- duplicate event count
-- lock contention count
-
-## MVP Acceptance Criteria
-
-1. An eligible Azure DevOps task creates one run.
-2. OpenClaw can analyze the task and produce a plan.
-3. OpenClaw can call Codex through ACP.
-4. Code changes can be committed and pushed to a task branch.
-5. A PR can be created.
-6. PR comments can resume the same run.
-7. CI failures can resume the same run.
-8. Rocket.Chat receives lifecycle notifications.
-9. The same bundle can run with Docker and without Docker.
-
-## Build Order
-
-1. `run_store`
-2. `ado_client`
-3. `codex_acp_runner`
-4. `rocketchat_notifier`
-5. `openclaw-plugin`
-   - `analyze-task`
-   - `implement-task`
-   - `task-run` flow
-6. PR feedback flow
-7. CI recovery flow
-8. Docker install bundle
-9. native install bundle
-
-## Future Work
-
-Only do these after the main loop is stable.
-
-- Azure DevOps MCP overlay
-- Rocket.Chat threaded control
-- alternate ACP executors
-- PostgreSQL
-- multi-gateway deployment
-- merge automation
-
-## Immediate Next Files
-
-If implementation starts next, create only these:
-
-- `deploy/config/providers.yaml`
-- `run_store/schema.sql`
-- `ado_client` request list
-- `openclaw-plugin/flows/task-run.yaml`
-- `openclaw-plugin/skills/analyze-task`
-- `openclaw-plugin/skills/implement-task`
+- 任务到分支到 PR 主链路已真实验证
+- PR 反馈恢复链路已真实验证
+- CI 恢复链路实现完成，但目标验证项目缺少真实 CI build 资源，无法做 live 闭环
+- Docker / Linux / 受保护分支等更强环境约束仍需继续验证

@@ -1,328 +1,178 @@
-# ClawHarness v1 PRD and Detailed Delivery Plan
+# ClawHarness v1 PRD 与交付计划
 
-Date: 2026-04-05
-Status: Execution baseline
-Expands:
+日期：2026-04-05
+状态：执行基线
+展开自：
 - `.omx/plans/clawharness-master-plan-2026-04-05.md`
 - `.omx/plans/clawharness-mvp-technical-design-2026-04-05.md`
 - `.omx/plans/clawharness-support-matrix-2026-04-05.md`
 
-## Baseline Sources
+## 基线来源
 
-- Goal, fixed v1 decisions, module boundaries, main flow, statuses, MVP acceptance, build order, and immediate-next files come from `.omx/plans/clawharness-master-plan-2026-04-05.md:10-426`.
-- Provider modes, support matrix, workflow stability, runtime fallback rules, and validation profiles come from `.omx/plans/clawharness-support-matrix-2026-04-05.md:209-497`.
-- TaskFlow details, skill contracts, executor contract, deployment layout, security policy, monitoring, and implementation sequence come from `.omx/plans/clawharness-mvp-technical-design-2026-04-05.md:168-784`.
+- 产品目标、固定决策、模块边界和主流程来自总体主计划
+- 支持矩阵、工作流稳定性规则和部署验证来自 support matrix
+- TaskFlow、skill 契约、执行器契约、部署布局和安全策略来自 MVP 技术设计
 
-## Product Goal
+## 产品目标
 
-Build the smallest internal AI software harness that can ingest Azure DevOps work, let OpenClaw analyze and plan it, execute code changes through Codex via ACP, open a PR, react to PR comments and CI failures, notify Rocket.Chat, and run in both Docker and native installs.
+构建一个尽可能小、但能真实落地的内部 AI 软件交付 Harness：
 
-## Fixed v1 Decisions
+- 从 Azure DevOps 接收工作
+- 由 OpenClaw 分析与规划
+- 通过 ACP 调用 Codex 修改代码
+- 自动开 PR
+- 对 PR 评论和 CI 故障作出反应
+- 发送 Rocket.Chat 生命周期通知
+- 既支持 Docker 也支持原生安装
 
-These decisions are treated as locked unless a later ADR replaces them:
+## V1 固定边界
 
-- OpenClaw is the control center.
-- Codex is reached through ACP, not a custom executor protocol.
-- Azure DevOps starts with `ado-rest`; `ado-mcp` is an optional later overlay.
-- Rocket.Chat starts in `rocketchat-webhook` notify-only mode.
-- SQLite is the only runtime store in v1.
-- One OpenClaw Gateway instance is enough for v1.
-- One workspace is created per task run.
-- No auto-merge, no multi-provider runtime, and no heavy external orchestrator in v1.
+- OpenClaw 是控制中心
+- Codex 只通过 ACP 调度
+- Azure DevOps 先使用 `ado-rest`
+- Rocket.Chat 先使用 `rocketchat-webhook`
+- SQLite 是唯一运行时存储
+- 单 gateway、单 run 单 workspace
+- 不做 auto-merge
+- 不做多提供方扩展
 
-## Assumptions for Detailed Planning
+## 规划假设
 
-The current source plans leave three open questions: Azure DevOps Services vs Server, notify-only vs threaded Rocket.Chat, and embedded webhook handling vs tiny companion process. To avoid blocking execution, this plan uses the lowest-risk assumptions and converts the open questions into early validation gates:
+为了避免开放问题阻塞交付，本计划采用最低风险基线：
 
-- Baseline provider profile: `ado-rest` + `rocketchat-webhook` + `codex-acp`.
-- Baseline deployment target: support both Docker and native, but validate Docker first because it is the fastest pilot path.
-- Baseline ingress shape: prefer plugin-native webhook handling; if the installed OpenClaw hook surface is insufficient, ship a tiny bundled bridge without changing flow contracts.
+- Provider 组合：`ado-rest` + `rocketchat-webhook` + `codex-acp`
+- 部署目标：同时保留 Docker 和原生部署能力，但优先验证最快能落地的路径
+- Ingress 形态：优先使用插件原生 webhook；如果 OpenClaw 已安装 hook 面不足，则引入轻量 bridge，但不改变 flow 契约
 
-## Scope
+## 范围
 
-### In Scope
+### 范围内
 
-- `run_store` with SQLite schema, locks, dedupe, audit, and run mapping.
-- `ado_client` in `ado-rest` mode for task, repo, PR, and CI operations.
-- `codex_acp_runner` for task execution and resume through OpenClaw ACP.
-- `rocketchat_notifier` in webhook mode.
-- `openclaw-plugin` flows, hooks, skills, and runtime composition.
-- `task-run`, `pr-feedback`, and `ci-recovery` flows.
-- Deployment assets for Docker and native installs.
-- Verification assets, runbooks, and acceptance evidence for MVP.
+- `run_store`：SQLite schema、锁、去重、审计、run 映射
+- `ado_client`：工作项、仓库、PR、CI 的 `ado-rest` 操作
+- `codex_acp_runner`：主链路与恢复链路的 ACP 执行
+- `rocketchat_notifier`：webhook 通知
+- `openclaw-plugin`：flows、hooks、skills 和运行时组合
+- `task-run`、`pr-feedback`、`ci-recovery`
+- Docker 和原生安装的部署资产
+- 验证脚本、运行手册、验收证据
 
-### Out of Scope
+### 范围外
 
-- `ado-mcp` as a required runtime path.
-- `rocketchat-bridge` as an MVP dependency.
-- Alternate ACP executors.
-- PostgreSQL or multi-gateway coordination.
-- Auto-merge, generalized provider marketplace, and advanced approval UI.
+- `ado-mcp` 作为必须运行路径
+- `rocketchat-bridge` 作为 MVP 依赖
+- 其他 ACP 执行器
+- PostgreSQL / 多 gateway 协调
+- 自动合并、通用 provider 市场、复杂审批 UI
 
-## Success Metrics
+## 成功指标
 
-- One eligible Azure DevOps task creates exactly one active `TaskRun`.
-- Duplicate event replay produces no duplicate run.
-- Lock contention allows only one owner for a task at a time.
-- One `task-run` flow can reach branch push and PR creation through Codex via ACP.
-- PR comment and CI failure events resume the same session context.
-- Rocket.Chat receives lifecycle notifications for started, PR opened, CI failed, blocked, and completed states.
-- The same plugin bundle and config model work in Docker and native deployments.
+- 一个合格的 Azure DevOps 任务只创建一个活动 `TaskRun`
+- 重复事件不会产生重复 run
+- 同一时刻只有一个 owner 可以持有任务锁
+- `task-run` 可以通过 ACP 走到分支推送和 PR 创建
+- PR 评论与 CI 故障事件能回到同一运行上下文
+- Rocket.Chat 能收到关键生命周期通知
+- 同一套插件与配置模型能跑在 Docker 和原生部署下
 
-## Workstreams
+## 工作流拆解
 
-### 1. Runtime and Persistence
+### 1. 运行时与持久化
 
-Objective:
-Define the durable runtime backbone that survives long-running sessions and repeated events.
+目标：
+- 定义可承载长会话和重复事件的运行时骨架
 
-Deliverables:
+交付物：
 - `run_store/schema.sql`
-- lock and dedupe rules
-- run and audit persistence API
-- status transition rules
-
-Dependencies:
-- none
+- 锁与去重规则
+- run / audit 持久化 API
+- 状态迁移规则
 
 ### 2. Azure DevOps Provider
 
-Objective:
-Implement the concrete provider path that all MVP flows depend on.
+目标：
+- 实现 MVP 所依赖的具体 Provider 路径
 
-Deliverables:
-- `ado_client` request list and request/response model
-- `ado-rest` task, repo, PR, and CI operations
-- event normalization contract
+交付物：
+- `ado_client` 请求清单
+- 任务、仓库、PR、CI 操作
+- 事件归一化契约
 
-Dependencies:
-- runtime store for run, lock, and dedupe lookup
+### 3. 编码执行器
 
-### 3. Coding Executor
+目标：
+- 通过 ACP 把 OpenClaw 与 Codex 连接起来
 
-Objective:
-Connect OpenClaw to Codex through ACP with a stable execution contract.
-
-Deliverables:
+交付物：
 - `codex_acp_runner`
-- executor input/output schema
-- resume and cancel support
+- 执行输入输出 schema
+- 运行与恢复契约
 
-Dependencies:
-- runtime store for session and workspace mapping
+### 4. OpenClaw 插件与流程编排
 
-### 4. OpenClaw Plugin and Flow Orchestration
+目标：
+- 把运行时、provider 和执行器组成可恢复 flows
 
-Objective:
-Compose the runtime, provider adapters, and executor into resumable flows.
-
-Deliverables:
+交付物：
 - `openclaw-plugin/flows/task-run.yaml`
 - `openclaw-plugin/flows/pr-feedback.yaml`
 - `openclaw-plugin/flows/ci-recovery.yaml`
-- `openclaw-plugin/skills/analyze-task`
-- `openclaw-plugin/skills/implement-task`
-- `openclaw-plugin/skills/fix-pr-feedback`
-- `openclaw-plugin/skills/recover-ci-failure`
-- ingress hooks for task, PR, and CI events
+- hooks 与 skills
 
-Dependencies:
-- runtime store, `ado_client`, and `codex_acp_runner`
+### 5. 通知与部署
 
-### 5. Chat Notification
+目标：
+- 补齐可运行、可通知、可部署的最小操作面
 
-Objective:
-Provide low-risk human visibility without adding chat control complexity.
-
-Deliverables:
+交付物：
 - `rocketchat_notifier`
-- notification templates for started, PR opened, CI failed, blocked, and completed
+- Docker 资产
+- Windows / systemd 资产
+- healthcheck 与验证脚本
 
-Dependencies:
-- runtime store and flow status transitions
+## 关键需求
 
-### 6. Deployment and Operations
+### 任务主链路
 
-Objective:
-Package the same bundle for pilot and production-starter installation modes.
+- 接到任务后必须完成去重与认领
+- 运行前必须准备独立工作区
+- 必须先检查、后发布
+- PR 由 harness 创建，而不是执行器直接创建
 
-Deliverables:
-- `deploy/config/openclaw.json`
-- `deploy/config/providers.yaml`
-- `deploy/config/harness-policy.yaml`
-- `deploy/docker/compose.yml`
-- `deploy/systemd/*`
-- `deploy/windows/*`
-- healthcheck scripts and install notes
+### PR 恢复链路
 
-Dependencies:
-- component skeletons from the first five workstreams
+- 必须通过 `pr_id -> run_id` 找回同一运行
+- 必须使用同一 `workspace_path` 与 `branch_name`
+- 必须处理未解决的评论
+- 不允许为同一条反馈创建第二个 run
 
-## Detailed Milestones
+### CI 恢复链路
 
-### Milestone 0: Decision Baseline and Skeleton
+- 必须通过 `ci_run_id -> run_id` 找回同一运行
+- 必须给出“自动恢复”或“升级人工”的清晰分流
+- 恢复时必须保留审计证据
 
-Purpose:
-Freeze the MVP baseline so implementation does not drift into optional paths.
+### 通知
 
-Implementation:
-1. Confirm `ado-rest` / `rocketchat-webhook` / `codex-acp` / SQLite as the P0 profile.
-2. Create the top-level repository layout from the master plan.
-3. Add config templates and placeholder flow/skill file locations.
-4. Record unresolved design decisions as explicit validation tasks instead of free-form TODOs.
+- 至少覆盖 started、PR opened、CI failed、blocked、completed
+- 通知失败不能打断主业务链路
 
-Exit Criteria:
-- Planned directory layout exists for `run_store`, `ado_client`, `codex_acp_runner`, `rocketchat_notifier`, `openclaw-plugin`, and `deploy`.
-- `providers.yaml` includes explicit mode selection and fallback fields.
-- No P1 feature is needed to start the main `task-run` flow.
+### 部署
 
-### Milestone 1: Runtime Core
+- 支持 Docker
+- 支持 Windows 原生
+- 支持 Linux systemd
 
-Purpose:
-Create the durable state model before any provider or flow logic is built on top.
+## 验收入口
 
-Implementation:
-1. Define the SQLite schema for `task_runs`, `task_locks`, `event_dedupe`, and `run_audit`.
-2. Implement lock acquisition, lock expiry, lock release, and dedupe lookup behavior.
-3. Implement status transitions for `queued -> claimed -> planning -> coding -> opening_pr -> awaiting_ci/awaiting_review` and terminal failure states.
-4. Add audit helpers for fallback, retry, and human handoff events.
+V1 是否关闭，以 `.omx/plans/test-spec-clawharness-v1-2026-04-05.md` 的 AC-01 至 AC-13 为准。
+所有声称完成的能力都必须有对应证据记录在 `.omx/plans/evidence-clawharness-v1-2026-04-05.md`。
 
-Exit Criteria:
-- Concurrent claim attempts yield one winner and one rejected claimant.
-- Replayed event fingerprints do not create a second active run.
-- Run records contain enough data to resume task, PR, and CI events.
+## 当前状态
 
-### Milestone 2: Azure DevOps Provider Baseline
+截至 `2026-04-05`：
 
-Purpose:
-Enable the minimum provider surface needed for task-to-PR execution.
-
-Implementation:
-1. Define the normalized event contract and request list.
-2. Implement `task.get`, `task.update_status`, `task.add_comment`, `repo.prepare_workspace`, `vcs.create_branch`, `vcs.commit_and_push`, `pr.create`, `pr.get`, `pr.list_comments`, `pr.reply`, `ci.get_status`, and `ci.retry`.
-3. Bind all flow-facing calls to unified capability names only.
-4. Add compatibility probes that classify the environment as Azure DevOps Services or Server without changing the shared flow shape.
-
-Exit Criteria:
-- `ado-rest` supports the full MVP task, PR, and CI call set.
-- No shared flow requires vendor-specific capability names.
-- Environment detection results are captured as audit or startup diagnostics.
-
-### Milestone 3: Codex ACP Executor
-
-Purpose:
-Make code generation resumable and traceable through OpenClaw ACP.
-
-Implementation:
-1. Implement executor input and output shapes from the technical design.
-2. Wire session and workspace lookup through the runtime store.
-3. Support new task execution, resumed execution, and controlled cancellation.
-4. Return changed files, summary, check results, and follow-up items in a stable contract.
-
-Exit Criteria:
-- ACP can execute against a prepared workspace and return structured output.
-- Resume uses the existing run/session mapping rather than creating a second coding context.
-- Executor output is consumable by `task-run`, `pr-feedback`, and `ci-recovery`.
-
-### Milestone 4: Main `task-run` Flow
-
-Purpose:
-Reach the first end-to-end happy path from task ingestion to PR creation.
-
-Implementation:
-1. Implement `analyze-task` and `implement-task`.
-2. Build `task-run.yaml` using only unified capabilities.
-3. Add ingress hook logic for task events and run claiming.
-4. Gate branch push and PR creation on check results.
-5. Emit task-system updates and leave notifier hook points for lifecycle chat delivery.
-
-Exit Criteria:
-- One eligible task can progress from event intake to PR creation.
-- The flow records `planning`, `coding`, `opening_pr`, and `awaiting_ci` or `awaiting_review`.
-- Branch push occurs only after checks run.
-
-### Milestone 5: Resume Loops and Notifications
-
-Purpose:
-Preserve a single durable run across human review and automated failure paths, and make lifecycle visibility available to operators.
-
-Implementation:
-1. Implement `pr-feedback.yaml` and `fix-pr-feedback`.
-2. Implement `ci-recovery.yaml` and `recover-ci-failure`.
-3. Resolve `pr_id -> run_id` and `ci_run_id -> run_id`.
-4. Add escalation behavior for unpatchable CI failures.
-5. Implement `rocketchat_notifier` webhook delivery for started, PR opened, CI failed, blocked, and completed states.
-
-Exit Criteria:
-- PR comments resume the same run and publish an update.
-- CI failures either patch and retry or move the run to `awaiting_human`.
-- No resume path creates a second active run for the same task.
-- Lifecycle notifications are emitted through the notifier without requiring threaded chat control.
-
-### Milestone 6: Deployment and Operational Hardening
-
-Purpose:
-Package and validate the MVP in both supported install modes.
-
-Implementation:
-1. Create Docker Compose assets with mounted SQLite persistence.
-2. Create native-install assets for Linux and Windows service management.
-3. Add health checks, basic metrics, and environment-driven secret loading.
-4. Document install, restart, rollback, and stuck-run recovery steps.
-
-Exit Criteria:
-- Docker restart preserves SQLite state and plugin artifacts.
-- Native install survives reboot and starts cleanly through the selected service wrapper.
-- Operators can verify system health using health endpoints or CLI checks.
-
-## File-First Backlog
-
-These files should be created before deeper implementation because they unblock the largest number of downstream tasks:
-
-1. `deploy/config/providers.yaml`
-2. `run_store/schema.sql`
-3. `ado_client/request-list.md` or equivalent request contract artifact
-4. `openclaw-plugin/flows/task-run.yaml`
-5. `openclaw-plugin/skills/analyze-task`
-6. `openclaw-plugin/skills/implement-task`
-
-## Risk Register
-
-### Risk: Azure DevOps Services vs Server compatibility differs more than expected
-
-Mitigation:
-- Implement `ado-rest` as the hard baseline.
-- Add environment probes and compatibility tests before any `ado-mcp` work.
-
-### Risk: OpenClaw webhook surface is not enough for direct event intake
-
-Mitigation:
-- Keep the ingress contract stable.
-- Allow a tiny bundled bridge that only receives webhooks, writes SQLite, and wakes OpenClaw.
-
-### Risk: Chat requirements expand into thread control too early
-
-Mitigation:
-- Lock MVP to `rocketchat-webhook`.
-- Keep `chat.read_thread` and `chat.resolve_thread_target` behind a later bridge milestone.
-
-### Risk: Flow logic drifts into vendor-specific calls
-
-Mitigation:
-- Reject `ado.*`, `rocketchat.*`, or `codex.*` names in shared flows.
-- Review every flow file against the unified capability contract before closing a milestone.
-
-### Risk: Resume logic loses context across long-running sessions
-
-Mitigation:
-- Persist task, PR, CI, workspace, and session mapping in the runtime store.
-- Require resume-path tests before closing Milestone 5.
-
-## Release Gate
-
-MVP execution can move from planning into broad implementation only when the following are true:
-
-- This PRD is accepted as the active work breakdown.
-- `.omx/plans/test-spec-clawharness-v1-2026-04-05.md` is the active acceptance source.
-- `.omx/plans/pdca-clawharness-v1-2026-04-05.md` is used as the working loop for cycle closure.
-- The team agrees that all P1 items stay out of scope until Milestone 6 is stable.
+- 任务主链路已完成真实验证
+- PR 反馈恢复已完成真实验证
+- CI 恢复已实现并通过本地测试，但 live 验证受目标项目缺少构建资源阻塞
+- 其余部署和策略能力已具备资产，但仍需按目标环境逐项验证

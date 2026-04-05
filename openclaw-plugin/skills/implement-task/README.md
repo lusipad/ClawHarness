@@ -1,24 +1,24 @@
 # `implement-task`
 
-Status: draft contract
+状态：草案契约
 
-## Purpose
+## 用途
 
-Turn the `analyze-task` output into a coding request for the ACP executor and collect the result.
+把 `analyze-task` 的输出转成 ACP 编码请求，并收集执行结果。
 
-## Inputs
+## 输入
 
-- plan output from `analyze-task`
+- `analyze-task` 的计划输出
 - workspace path
 - repository policies
 
-## Required Output
+## 必要输出
 
-- code changes
-- test or check summary
-- commit summary
+- 代码改动
+- 测试或检查摘要
+- 提交摘要
 
-## Acceptance Notes
+## 验收说明
 
-- The skill must preserve the no-direct-merge and protected-branch rules.
-- The skill must provide enough output for the PR and resume flows to continue without re-analysis.
+- 必须保留“不直接合并”和“禁止推送受保护分支”的规则。
+- 必须输出足够信息，让 PR 流程和恢复流程无需重新分析即可继续。

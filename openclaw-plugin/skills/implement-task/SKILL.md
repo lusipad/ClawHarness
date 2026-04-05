@@ -1,28 +1,28 @@
 ---
 name: implement-task
-description: Turn an approved task plan into an ACP coding request and collect the execution result.
+description: 将批准后的任务计划转换为 ACP 编码请求，并收集执行结果。
 ---
 
 # implement-task
 
-## Purpose
+## 用途
 
-Use the `analyze-task` output, repository policies, and workspace path to drive Codex through ACP.
+使用 `analyze-task` 的输出、仓库策略和工作区路径，通过 ACP 驱动 Codex 执行实现。
 
-## Inputs
+## 输入
 
-- plan output from `analyze-task`
+- `analyze-task` 的计划输出
 - workspace path
 - repository policies
 
-## Required Output
+## 必要输出
 
-- code changes
-- test or check summary
-- commit summary
+- 代码改动
+- 测试或检查摘要
+- 提交摘要
 
-## Guardrails
+## 约束
 
-- no direct merge
-- no protected-branch push
-- checks must run before PR creation
+- 禁止直接合并
+- 禁止直接推送受保护分支
+- 在创建 PR 之前必须先跑检查

@@ -1,19 +1,19 @@
 # `fix-pr-feedback`
 
-Status: draft contract
+状态：草案契约
 
-## Purpose
+## 用途
 
-Process unresolved PR comments against the current branch state and prepare a targeted patch request.
+针对当前分支状态处理未解决的 PR 评论，并准备有针对性的补丁请求。
 
-## Inputs
+## 输入
 
-- current diff
-- unresolved review comments
-- failing checks if present
+- 当前 diff
+- 未解决的评审评论
+- 如有则包括失败检查项
 
-## Required Output
+## 必要输出
 
-- patch summary
-- addressed comment set
-- unresolved blockers
+- 补丁摘要
+- 已处理评论集合
+- 仍未解决的阻塞项

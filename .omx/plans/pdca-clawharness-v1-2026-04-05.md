@@ -1,367 +1,160 @@
-# ClawHarness v1 PDCA Execution Loop
+# ClawHarness v1 PDCA 执行记录
 
-Date: 2026-04-05
-Status: Core V1 closure validated through live PR feedback; CI and deployment follow-up cycles still open
-Companion to:
+日期：2026-04-05
+状态：V1 主闭环已完成到真实 PR 反馈；CI 与部署扩展验证仍在后续周期中
+配套文档：
 - `.omx/plans/prd-clawharness-v1-2026-04-05.md`
 - `.omx/plans/test-spec-clawharness-v1-2026-04-05.md`
 
-## Objective
+## 目标
 
-Run the ClawHarness MVP through short PDCA cycles so that every implementation increment is scoped, verified, and either stabilized or corrected before the next slice begins.
+用短周期 PDCA 驱动 ClawHarness MVP，让每个实现增量都具备清晰范围、验证证据和纠偏记录。
 
-## Operating Rules
+## 工作规则
 
-- Each cycle owns one bounded milestone or one high-risk cross-cutting issue.
-- No cycle starts without explicit acceptance targets mapped to the test spec.
-- No cycle closes without evidence for completed work and a decision on remaining risks.
-- Optional P1 items stay out of cycle scope unless a later ADR changes the cut line.
-- If a check fails, the cycle stays open and loops through corrective action instead of reporting partial completion.
+- 每个周期只负责一个边界清晰的里程碑，或一个高风险跨模块问题
+- 周期开始前必须绑定明确的验收标准
+- 周期结束前必须沉淀证据与剩余风险
+- 可恢复问题不算完成，必须继续进入纠偏回路
 
-## Standard PDCA Template
+## 标准 PDCA 模板
 
 ### Plan
 
-Required outputs:
-- cycle objective
-- exact in-scope files or modules
-- acceptance criteria IDs from the test spec
-- risks, assumptions, and entry conditions
-- expected proof artifacts
+必须产出：
+- 周期目标
+- 涉及文件或模块
+- 对应测试规范中的 AC
+- 风险、假设和进入条件
+- 预期证据
 
 ### Do
 
-Required actions:
-- implement only the planned scope
-- capture changed files and notable design decisions
-- record verification commands or procedures as they are executed
+必须执行：
+- 仅实现本轮范围内内容
+- 记录改动文件与关键设计决策
+- 同步记录已执行的验证命令
 
 ### Check
 
-Required outputs:
-- pass/fail result for each targeted acceptance criterion
-- evidence links or artifact paths
-- defect list with severity
-- gap analysis between expected and actual behavior
+必须产出：
+- 每条目标 AC 的通过/失败结论
+- 证据路径
+- 缺陷列表
+- 预期与实际差异
 
 ### Act
 
-Required outputs:
-- decision to keep, fix, narrow, or expand scope
-- backlog updates
-- plan adjustments for the next cycle
-- ADR or policy update if a fixed decision changes
+必须产出：
+- 保留、修复、缩小或扩展范围的决策
+- 待办与下轮入口条件
 
-## Cycle Closure Checklist
+## 初始周期图
 
-- planned files were changed or explicitly deferred
-- planned acceptance criteria were executed
-- failures were either fixed or carried as explicit blockers
-- residual risks were recorded
-- the next cycle has a clean entry condition
+### 周期 0：基线与骨架
 
-## Initial Cycle Map
-
-### Cycle 0: Baseline and Skeleton
-
-Plan:
-- establish the repository skeleton
-- create `providers.yaml`, `schema.sql`, and flow/skill placeholders
-- confirm P0 profile assumptions
-
-Do:
-- create skeleton files and baseline config contracts
-- document unresolved questions as validation tasks
-
-Check:
-- validate file presence and config completeness
-- confirm no P1 dependency is required for the happy path
-
-Act:
-- freeze the baseline profile
-- move unresolved environment questions into the validation backlog
-
-Target acceptance:
+目标 AC：
 - AC-11
-- partial AC-12
+- AC-12（部分）
 
-### Cycle 1: Runtime Core
+### 周期 1：运行时核心
 
-Plan:
-- implement `run_store`
-- define status transitions, locks, dedupe, and audit
-
-Do:
-- build schema and persistence APIs
-- implement concurrency-safe claim logic
-
-Check:
-- run lock, dedupe, and status-transition verification
-- inspect audit records for fallback and retry support
-
-Act:
-- adjust schema or locking rules based on failed concurrency cases
-
-Target acceptance:
+目标 AC：
 - AC-01
-- partial AC-13
+- AC-13（部分）
 
-### Cycle 2: Azure DevOps Provider Baseline
+### 周期 2：Azure DevOps Provider 基线
 
-Plan:
-- implement `ado-rest` task, repo, PR, and CI operations
-- add event normalization
-
-Do:
-- build the concrete adapter and request contract
-- wire unified capability names
-
-Check:
-- validate all MVP provider calls
-- verify shared flows do not depend on vendor-specific names
-
-Act:
-- keep `ado-mcp` out of scope unless `ado-rest` is stable
-
-Target acceptance:
-- partial AC-05
+目标 AC：
+- AC-05（部分）
 - AC-11
 
-### Cycle 3: Codex ACP Executor and Main Flow
+### 周期 3：ACP 执行器与主流程
 
-Plan:
-- implement the ACP executor path
-- implement `analyze-task`, `implement-task`, and `task-run`
-
-Do:
-- wire workspace preparation, coding execution, checks, push, and PR creation
-
-Check:
-- verify structured planning output
-- verify executor output contract
-- verify check gate before PR
-- verify task-to-PR happy path
-
-Act:
-- refine executor contract or flow sequencing if the happy path fails
-
-Target acceptance:
+目标 AC：
 - AC-02
 - AC-03
 - AC-04
 - AC-05
 
-### Cycle 4: Resume Loops
+### 周期 4：恢复闭环
 
-Plan:
-- implement `pr-feedback` and `ci-recovery`
-- add run/session lookup for PR and CI events
-
-Do:
-- build resume-path flows and escalation behavior
-
-Check:
-- verify stable `run_id` reuse
-- verify patch-or-escalate CI behavior
-
-Act:
-- tighten mapping or escalation rules if any resume path forks incorrectly
-
-Target acceptance:
+目标 AC：
 - AC-06
 - AC-07
 
-### Cycle 5: Notifications and Deployment
+### 周期 5：通知与部署
 
-Plan:
-- implement Rocket.Chat notifications
-- package Docker and native deployment assets
-
-Do:
-- wire lifecycle notifications
-- create Docker Compose and native-service install assets
-- add health checks
-
-Check:
-- verify Docker persistence and native service behavior
-- verify notifier payloads and delivery records
-
-Act:
-- fix operational gaps before broadening provider modes
-
-Target acceptance:
+目标 AC：
 - AC-08
 - AC-09
 - AC-10
-- partial AC-12
-- partial AC-13
+- AC-12（部分）
+- AC-13（部分）
 
-### Cycle 6: Hardening and Release Gate
+### 周期 6：加固与发布门禁
 
-Plan:
-- close observability, policy, and residual defects
-- assemble the evidence package
+目标 AC：
+- AC-01 到 AC-13 全量收口
 
-Do:
-- rerun the full acceptance suite
-- close release-blocking gaps
-- finalize runbooks
+## 当前基线
 
-Check:
-- confirm AC-01 through AC-13 all pass
-- confirm both deployment profiles are proven
+当前仓库已经具备以下基础：
 
-Act:
-- declare MVP ready or open another corrective cycle with a narrowed scope
+- `run_store` 可执行
+- `ado_client` 可执行
+- `codex_acp_runner` 可执行
+- `harness_runtime` 可执行
+- `rocketchat_notifier` 可执行
+- OpenClaw 插件骨架、flows、skills 已落地
+- 部署资产已提供
 
-Target acceptance:
-- AC-01 through AC-13
+当前验证证据包括：
 
-## Daily Working Rhythm
+- `python -m unittest discover -s tests -v`：`54/54`
+- `python -m compileall ado_client codex_acp_runner harness_runtime rocketchat_notifier run_store tests`
+- `python -m harness_runtime.main --help`
+- OpenClaw ACP 真实 smoke
+- 真实 Azure DevOps 任务 `29` 到 PR `17`
+- 真实 Azure DevOps 任务 `30` 到干净 PR `18`
+- 真实 Azure DevOps 任务 `31` 到 PR `19`，再到同一 run 的 PR 反馈恢复
 
-For each active cycle:
+## 周期 3 纠偏状态
 
-1. Refresh the cycle plan with scope, changed files, and target criteria.
-2. Execute implementation only for the planned slice.
-3. Run the targeted checks before claiming cycle progress.
-4. Record evidence and residual risks.
-5. Either close the cycle or open a corrective sub-cycle.
+目标：
+- 用真实 Azure DevOps 项目验证 V1 主 happy path
 
-## Escalation Rules
-
-- A release-blocking failure in locking, dedupe, resume mapping, or deployment persistence triggers an immediate corrective cycle.
-- A question that changes fixed v1 scope requires an ADR update before more implementation continues.
-- A provider-specific shortcut that breaks the unified-capability rule must be removed before the cycle can close.
-
-## Metrics Tracked Per Cycle
-
-- target acceptance criteria count
-- passed criteria count
-- failed criteria count
-- defects opened and closed
-- time from cycle start to verified closure
-- unresolved risks carried forward
-
-## Cycle Status Template
-
-Use this structure at the end of each cycle:
-
-```md
-## Cycle <n> Status
-
-Objective:
-- ...
-
-Planned scope:
-- ...
-
-Changed files:
-- ...
-
-Acceptance results:
-- AC-xx: passed | failed | blocked
-
-Evidence:
-- ...
-
-Residual risks:
-- ...
-
-Act decision:
-- continue | corrective cycle | re-scope
-```
-
-## Current Starting Point
-
-The repository-scoped implementation work is complete for the current session:
-
-- Cycle 0:
-  - planning artifacts, skeleton directories, flow drafts, and baseline config files exist
-- Cycle 1:
-  - `run_store` has an executable Python SQLite implementation for claim, lock, dedupe, status transition, lookup, and audit behavior
-- Cycle 2:
-  - `ado_client` has an executable Python `ado-rest` baseline for task, PR, CI, and event-normalization operations
-- Cycle 3:
-  - `codex_acp_runner` has an executable ACP payload builder, task prompt formatter, and resume-session contract
-- Cycle 4:
-  - PR feedback and CI recovery orchestration are implemented in `harness_runtime/bridge.py` and `harness_runtime/orchestrator.py`
-- Cycle 5:
-  - `rocketchat_notifier` exists
-  - Docker, systemd, Windows service, and healthcheck assets exist
-  - OpenClaw native plugin metadata and skill bundles exist
-- Cycle 6:
-  - local evidence bundle exists in `.omx/plans/evidence-clawharness-v1-2026-04-05.md`
-
-Verification evidence currently includes:
-
-- Python compile checks for all implemented modules
-- `python -m unittest discover -s tests -v` passing with 54 tests
-- JSON syntax validation for `deploy/config/openclaw.json`, `openclaw-plugin/package.json`, and `openclaw-plugin/openclaw.plugin.json`
-- `python -m harness_runtime.main --help` CLI smoke check
-- live OpenClaw ACP smoke execution with structured executor result output
-- live Azure DevOps work item `29` reaching branch + PR creation, which exposed the result-artifact isolation bug
-- corrective fix for task context loading and executor artifact isolation
-- live Azure DevOps work item `30` reaching branch + clean PR creation with only `README.md` changed
-- live Azure DevOps work item `31` reaching PR `19` and then completing a real PR-feedback follow-up on the same `run_id`
-- run-store audit persisted in `C:\Users\lus\.openclaw\harness\harness.db`
-
-Remaining work is environment-bound rather than repository-bound:
-
-- real CI failure recovery verification
-- live Docker and Linux native service startup verification
-- protected-branch / reviewer / CI policy verification
-
-## Cycle 3 Corrective Status
-
-Objective:
-- prove the V1 core task -> ACP -> checks -> branch -> PR loop against the real Azure DevOps project
-
-Planned scope:
+计划范围：
 - `ado_client`
 - `codex_acp_runner`
 - `harness_runtime`
 - `.omx/plans/evidence-clawharness-v1-2026-04-05.md`
 
-Changed files:
-- `ado_client/client.py`
-- `codex_acp_runner/runner.py`
-- `harness_runtime/orchestrator.py`
-- `harness_runtime/openclaw_client.py`
-- `harness_runtime/bridge.py`
-- `harness_runtime/main.py`
-- `harness_runtime/config.py`
-- `tests/test_ado_client.py`
-- `tests/test_codex_acp_runner.py`
-- `tests/test_openclaw_client.py`
-- `tests/test_harness_runtime.py`
-- `tests/test_task_orchestrator.py`
-- `.omx/plans/evidence-clawharness-v1-2026-04-05.md`
+验收结果：
+- AC-02：通过
+- AC-03：真实环境通过
+- AC-04：真实环境通过（最小仓库画像）
+- AC-05：真实环境通过
 
-Acceptance results:
-- AC-02: passed
-- AC-03: passed live
-- AC-04: passed live for the minimal repo profile
-- AC-05: passed live
+证据：
+- 第 1 轮 live run：工作项 `29`，PR `17`
+- 第 2 轮 live run：工作项 `30`，PR `18`
+- 自动化测试：`54/54`
 
-Evidence:
-- cycle 1 live run: work item `29`, PR `17`, issue discovered and captured
-- cycle 2 live run: work item `30`, active PR `18`, clean single-file diff
-- full automated test suite: `54/54` passing
+剩余风险：
+- 在周期 3 结束时，AC-06 与 AC-07 仍未完成真实验证
+- Docker 和 Linux 部署仍待验证
 
-Residual risks:
-- AC-06 and AC-07 were still only locally validated at the end of cycle 3
-- Docker and Linux deployment profiles still need live verification
+动作决策：
+- 关闭主 happy path
+- 将下一轮集中到恢复路径、部署与策略联动
 
-Act decision:
-- close the V1 core happy-path loop
-- keep later corrective cycles focused on resume paths, governed repos, and deployment validation
+## 周期 4 纠偏状态
 
-## Cycle 4 Corrective Status
+目标：
+- 关闭真实 PR 反馈恢复闭环，并修正 ACP 恢复兼容性问题
 
-Objective:
-- close the live PR feedback loop and harden ACP resume compatibility against the installed gateway behavior
-
-Planned scope:
+计划范围：
 - `harness_runtime/orchestrator.py`
 - `harness_runtime/bridge.py`
 - `run_store/store.py`
@@ -371,32 +164,32 @@ Planned scope:
 - `.omx/plans/evidence-clawharness-v1-2026-04-05.md`
 - `.omx/plans/pdca-clawharness-v1-2026-04-05.md`
 
-Changed files:
-- `harness_runtime/orchestrator.py`
-- `harness_runtime/bridge.py`
-- `run_store/store.py`
-- `tests/test_harness_runtime.py`
-- `tests/test_task_orchestrator.py`
-- `tests/test_run_store.py`
-- `.omx/plans/evidence-clawharness-v1-2026-04-05.md`
-- `.omx/plans/pdca-clawharness-v1-2026-04-05.md`
+验收结果：
+- AC-06：真实环境通过
+- AC-07：本地通过，真实环境因缺少 build 资源被阻塞
 
-Acceptance results:
-- AC-06: passed live
-- AC-07: passed locally, live blocked by missing CI builds in the validation project
+证据：
+- live task `31` 打开 PR `19`
+- PR `19` 上创建真实评论线程 `79`
+- `manual-ai-review-test-31` 在同一 `run_id` 上处理评论并回到 `awaiting_review`
+- 自动化测试：`54/54`
+- `compileall`：通过
 
-Evidence:
-- live task `31` opened PR `19` with run `manual-ai-review-test-31`
-- PR thread `79` was created with a real review comment and later received a ClawHarness reply on the same thread
-- live run audit returned `manual-ai-review-test-31` to `awaiting_review` after `pr_feedback_replied`
-- full automated test suite: `54/54` passing
-- `python -m compileall ado_client codex_acp_runner harness_runtime rocketchat_notifier run_store tests`: passed
+关键发现：
+- 已结束的 ACP 底层资源不能在当前 gateway 配置中直接 resume
+- gateway 对恢复执行存在 `thread=true`、重复 `label` 和已结束资源重开等兼容限制
 
-Residual risks:
-- the current Azure DevOps validation project had no build definitions or build runs on 2026-04-05, so AC-07 could not be exercised live
-- Docker and Linux deployment profiles still need live verification
-- protected-branch / reviewer / CI-policy interactions still need a governed target repository
+修正动作：
+- 恢复链路不再强依赖“重开已结束 ACP 资源”
+- 保留同一 `run_id`、`workspace_path`、`branch_name` 和逻辑 `session_id`
+- 在同一运行上下文中启动新的 ACP 执行完成恢复
+- 明确把 commit / push / PR reply / CI retry 的发布动作收回到 harness 侧
 
-Act decision:
-- treat the V1 collaboration loop as closed through PR feedback
-- keep the next corrective cycle focused on CI recovery in the first project that has a real build definition
+剩余风险：
+- 当前验证项目没有 build definitions / build runs，无法完成 AC-07 live 闭环
+- Docker 和 Linux 部署仍待真实环境验证
+- 受保护分支、reviewer 和 CI policy 更严格的仓库仍需验证
+
+动作决策：
+- 将 V1 协作闭环视为已完成到 PR 反馈层
+- 下一纠偏周期聚焦于具备真实构建定义的项目，用于完成 AC-07 live 验收

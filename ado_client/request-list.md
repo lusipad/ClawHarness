@@ -1,230 +1,229 @@
-# Azure DevOps Request List
+# Azure DevOps 请求清单
 
-Status: draft baseline
-Mode: `ado-rest`
+状态：MVP 基线草案
+模式：`ado-rest`
 
-This document defines the MVP request surface for the Azure DevOps adapter.
-All shared flow usage must map to unified capability names. Provider-specific URL paths stay inside `ado_client`.
+本文档定义 Azure DevOps 适配器在 MVP 阶段暴露的请求面。所有共享 flow 都必须映射到统一能力名，供应商特定的 URL 路径只允许留在 `ado_client` 内部。
 
-Implementation note:
-- The first `ado_client` code path is Python stdlib based, with no third-party HTTP dependency.
-- Endpoint shapes below are aligned to Microsoft Learn Azure DevOps REST references checked on 2026-04-05.
-- Work item comments currently require preview version `7.0-preview.3`, while the main work item, Git pull request, and build endpoints use `7.1`.
+实现说明：
+- 首版 `ado_client` 基于 Python 标准库实现，不引入第三方 HTTP 依赖。
+- 下列接口形状已对照 `2026-04-05` 检查过的 Microsoft Learn Azure DevOps REST 文档。
+- 工作项评论当前仍需使用预览版本 `7.0-preview.3`，其余工作项、Git PR、构建接口使用 `7.1`。
 
-## Task Capabilities
+## 任务能力
 
 ### `task.list_candidates`
 
-Purpose:
-- discover eligible work items when polling is enabled
+用途：
+- 在开启轮询模式时发现可执行工作项
 
-Expected input:
+期望输入：
 - project
-- query or queue filters
-- pagination cursor if needed
+- query 或队列过滤条件
+- 如有需要，分页游标
 
-Expected output:
-- normalized task summaries
+期望输出：
+- 归一化后的任务摘要列表
 
 ### `task.get`
 
-Purpose:
-- fetch the task body and metadata needed by `analyze-task`
+用途：
+- 读取 `analyze-task` 所需的任务正文与元数据
 
-Expected input:
+期望输入：
 - task id
 - project
 
-Expected output:
-- normalized task payload with title, description, repo binding, assignee, tags, and revision
+期望输出：
+- 含标题、描述、仓库绑定、负责人、标签和修订信息的归一化任务载荷
 
-Reference:
+参考接口：
 - `GET /{project}/_apis/wit/workitems/{id}?api-version=7.1`
 
 ### `task.update_status`
 
-Purpose:
-- write planning, blocked, PR-opened, or completed state back to Azure DevOps
+用途：
+- 将 planning、blocked、PR 已创建、completed 等状态回写到 Azure DevOps
 
-Expected input:
+期望输入：
 - task id
-- status or state transition
-- optional metadata such as run id or PR url
+- 状态值或状态迁移
+- 可选附加元数据，例如 run id 或 PR url
 
-Expected output:
-- updated task state
+期望输出：
+- 更新后的任务状态
 
-Reference:
+参考接口：
 - `PATCH /{project}/_apis/wit/workitems/{id}?api-version=7.1`
 
 ### `task.add_comment`
 
-Purpose:
-- add run summaries, blockers, or completion notes to the work item
+用途：
+- 向工作项补充运行摘要、阻塞原因或完成说明
 
-Expected input:
+期望输入：
 - task id
-- markdown or plain-text body
+- Markdown 或纯文本正文
 
-Expected output:
-- created comment metadata
+期望输出：
+- 新建评论的元数据
 
-Reference:
+参考接口：
 - `POST /{project}/_apis/wit/workItems/{id}/comments?api-version=7.0-preview.3`
 
-## Repository and Version-Control Capabilities
+## 仓库与版本控制能力
 
 ### `repo.prepare_workspace`
 
-Purpose:
-- resolve repository metadata and prepare a clean per-run workspace
+用途：
+- 解析仓库元数据，并为每次运行准备干净的独立工作区
 
-Expected input:
+期望输入：
 - repo id
 - run id
 - workspace root
 - branch prefix
 
-Expected output:
+期望输出：
 - workspace path
 - default branch
 - repo metadata
 
 ### `vcs.create_branch`
 
-Purpose:
-- create a task-scoped working branch
+用途：
+- 创建任务级工作分支
 
-Expected input:
+期望输入：
 - repo id
 - base branch
 - branch name
 
-Expected output:
-- created branch ref
+期望输出：
+- 创建后的分支 ref
 
 ### `vcs.commit_and_push`
 
-Purpose:
-- stage changes, create a commit, and push the working branch
+用途：
+- 暂存修改、创建提交并推送工作分支
 
-Expected input:
+期望输入：
 - workspace path
 - branch name
 - commit message
 
-Expected output:
-- pushed commit sha
-- remote branch url or ref
+期望输出：
+- 推送后的 commit sha
+- 远端分支 url 或 ref
 
-## Pull Request Capabilities
+## Pull Request 能力
 
 ### `pr.create`
 
-Purpose:
-- open the initial PR from the task branch
+用途：
+- 从任务分支创建初始 PR
 
-Expected input:
+期望输入：
 - repo id
 - source branch
 - target branch
 - title
 - description
 
-Expected output:
+期望输出：
 - PR id
 - PR url
-- reviewer summary if available
+- 如可获取，则返回 reviewer 摘要
 
-Reference:
+参考接口：
 - `POST /{project}/_apis/git/repositories/{repositoryId}/pullrequests?api-version=7.1`
 
 ### `pr.get`
 
-Purpose:
-- fetch current PR state
+用途：
+- 获取当前 PR 状态
 
-Expected input:
+期望输入：
 - repo id
 - PR id
 
-Expected output:
-- normalized PR summary
+期望输出：
+- 归一化 PR 摘要
 
-Reference:
+参考接口：
 - `GET /{project}/_apis/git/repositories/{repositoryId}/pullrequests/{pullRequestId}?api-version=7.1`
 
 ### `pr.list_comments`
 
-Purpose:
-- collect unresolved feedback for the resume loop
+用途：
+- 为恢复闭环收集未解决的评审反馈
 
-Expected input:
+期望输入：
 - repo id
 - PR id
 
-Expected output:
-- normalized comment list with status and author metadata
+期望输出：
+- 含状态与作者信息的归一化评论列表
 
-Reference:
+参考接口：
 - `GET /{project}/_apis/git/repositories/{repositoryId}/pullRequests/{pullRequestId}/threads?api-version=7.1`
 
 ### `pr.reply`
 
-Purpose:
-- post a response after applying review feedback
+用途：
+- 在处理完评审反馈后回帖
 
-Expected input:
+期望输入：
 - repo id
 - PR id
 - body
 
-Expected output:
-- created reply metadata
+期望输出：
+- 新建回复的元数据
 
-Reference:
+参考接口：
 - `POST /{project}/_apis/git/repositories/{repositoryId}/pullRequests/{pullRequestId}/threads/{threadId}/comments?api-version=7.1`
 
-## CI Capabilities
+## CI 能力
 
 ### `ci.get_status`
 
-Purpose:
-- read validation state for the active PR or run
+用途：
+- 读取当前 PR 或运行对应的校验状态
 
-Expected input:
+期望输入：
 - repo id
-- PR id or CI run id
+- PR id 或 CI run id
 
-Expected output:
-- normalized CI status summary
+期望输出：
+- 归一化 CI 状态摘要
 
-Reference:
+参考接口：
 - `GET /{project}/_apis/build/builds/{buildId}?api-version=7.1`
 
 ### `ci.retry`
 
-Purpose:
-- rerun a failed validation path when policy allows it
+用途：
+- 在策略允许时重新触发失败的校验链路
 
-Expected input:
+期望输入：
 - repo id
 - CI run id
 
-Expected output:
-- retry request acknowledgement
+期望输出：
+- 重试请求确认结果
 
-Reference:
+参考接口：
 - `POST /{project}/_apis/build/builds?api-version=7.1`
 
-Implementation note:
-- Azure DevOps does not expose one single generic "retry this exact failed run" endpoint across all pipeline shapes in the same way as the other APIs above.
-- The current baseline implementation re-queues a build from the existing build's `definition.id`, `sourceBranch`, `sourceVersion`, and `parameters`.
-- This is a pragmatic MVP inference and should be validated against the target CI configuration before production rollout.
+实现说明：
+- Azure DevOps 并没有像其他接口那样，统一暴露“按原样重试这个失败运行”的通用端点。
+- 当前 MVP 基线实现会读取原构建的 `definition.id`、`sourceBranch`、`sourceVersion` 和 `parameters`，然后重新排队一个构建。
+- 这是面向 MVP 的务实推断，正式上线前仍需在目标 CI 配置中验证。
 
-## Normalized Event Contract
+## 归一化事件契约
 
-Each inbound Azure DevOps event should be normalized before any flow sees it:
+所有 Azure DevOps 入站事件在进入 flow 之前都应先被归一化：
 
 ```json
 {
@@ -245,8 +244,8 @@ Each inbound Azure DevOps event should be normalized before any flow sees it:
 }
 ```
 
-## Open Questions for Implementation
+## 待确认问题
 
-- Confirm the exact REST endpoints and payload differences for Azure DevOps Services vs Azure DevOps Server.
-- Confirm whether branch policy or build status APIs differ enough to require adapter branching.
-- Confirm the retry semantics for the target CI configuration.
+- Azure DevOps Services 与 Azure DevOps Server 在 REST 端点和载荷上是否有关键差异。
+- 分支策略或构建状态 API 是否差异大到需要适配器分叉。
+- 目标 CI 配置下的真实重试语义是否与当前基线一致。

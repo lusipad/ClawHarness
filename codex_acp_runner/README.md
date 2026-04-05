@@ -1,13 +1,19 @@
 # `codex_acp_runner`
 
-Status: skeleton
+状态：基础实现已完成
 
-Purpose:
-- execute coding work through OpenClaw ACP
-- resume existing coding sessions for PR feedback and CI recovery
-- return structured execution summaries to the plugin flows
+用途：
+- 通过 OpenClaw ACP 发起编码执行
+- 把执行请求包装成稳定的输入输出协议
+- 接收结构化执行结果，供主流程、PR 反馈恢复和 CI 恢复使用
 
-Next implementation focus:
-- define the ACP request and response wrapper
-- map `run_id`, `session_id`, and `workspace_path`
-- support run, resume, and cancel behavior
+当前能力：
+- 定义 ACP 请求与响应封装
+- 映射 `run_id`、`session_id`、`workspace_path`
+- 支持普通运行与恢复运行
+- 支持读取结构化结果工件
+
+后续关注点：
+- 更细粒度的失败分类
+- 更明确的取消与中断协议
+- 与更多 ACP gateway 运行模式的兼容性验证

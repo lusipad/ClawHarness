@@ -1,22 +1,22 @@
 ---
 name: fix-pr-feedback
-description: Apply unresolved PR review feedback against the active run and produce a targeted patch plan.
+description: 针对活动运行处理未解决的 PR 评审反馈，并生成定向补丁计划。
 ---
 
 # fix-pr-feedback
 
-## Purpose
+## 用途
 
-Process unresolved PR comments, patch the active branch, and prepare the run for a push and recheck cycle.
+处理未解决的 PR 评论，修补当前活动分支，并让运行进入“重新检查并准备发布”的状态。
 
-## Inputs
+## 输入
 
-- current diff
-- unresolved review comments
-- failing checks if present
+- 当前 diff
+- 未解决的评审评论
+- 如有则包括失败检查项
 
-## Required Output
+## 必要输出
 
-- patch summary
-- addressed comment set
-- unresolved blockers
+- 补丁摘要
+- 已处理评论集合
+- 仍未解决的阻塞项

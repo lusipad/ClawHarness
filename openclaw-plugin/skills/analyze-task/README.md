@@ -1,25 +1,25 @@
 # `analyze-task`
 
-Status: draft contract
+状态：草案契约
 
-## Purpose
+## 用途
 
-Analyze a normalized task and produce the planning artifact that the coding executor will consume.
+分析归一化后的任务，并产出供编码执行器消费的规划工件。
 
-## Inputs
+## 输入
 
-- normalized task metadata
-- full task body
-- repository context
+- 归一化任务元数据
+- 完整任务正文
+- 仓库上下文
 
-## Required Output
+## 必要输出
 
-- structured execution plan
-- impacted files or modules
-- missing information list
-- risk level
+- 结构化执行计划
+- 受影响文件或模块
+- 缺失信息列表
+- 风险等级
 
-## Acceptance Notes
+## 验收说明
 
-- The output must be deterministic enough for `implement-task` to consume.
-- The output must be saved or attached so the run can resume after interruption.
+- 输出必须稳定到足以供 `implement-task` 直接消费。
+- 输出必须被保存或附着到运行上下文中，以便中断后恢复。

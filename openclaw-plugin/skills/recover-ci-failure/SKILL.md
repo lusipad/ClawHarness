@@ -1,21 +1,21 @@
 ---
 name: recover-ci-failure
-description: Triage failed CI runs and decide between patch-and-retry or escalation to a human.
+description: 对失败的 CI 运行进行分诊，并在“修补重试”和“升级人工”之间做出决策。
 ---
 
 # recover-ci-failure
 
-## Purpose
+## 用途
 
-Interpret CI failure evidence and route the run into recovery or escalation.
+解释 CI 失败证据，并将当前运行路由到自动恢复或人工升级路径。
 
-## Inputs
+## 输入
 
-- CI failure summary
-- latest code state
+- CI 失败摘要
+- 最新代码状态
 
-## Required Output
+## 必要输出
 
-- retry decision
-- patch summary when recoverable
-- escalation summary when not recoverable
+- 重试决策
+- 可恢复时的补丁摘要
+- 不可恢复时的升级摘要

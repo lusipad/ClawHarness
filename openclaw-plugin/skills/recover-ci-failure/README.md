@@ -1,18 +1,18 @@
 # `recover-ci-failure`
 
-Status: draft contract
+状态：草案契约
 
-## Purpose
+## 用途
 
-Interpret CI failure evidence and decide whether the run should patch and retry or escalate to a human.
+解释 CI 失败证据，并决定当前运行应该“修补后重试”还是“升级给人工处理”。
 
-## Inputs
+## 输入
 
-- CI failure summary
-- latest code state
+- CI 失败摘要
+- 最新代码状态
 
-## Required Output
+## 必要输出
 
-- retry decision
-- patch summary when recoverable
-- escalation summary when not recoverable
+- 重试决策
+- 可恢复时的补丁摘要
+- 不可恢复时的升级摘要

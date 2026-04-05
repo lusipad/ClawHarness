@@ -1,6 +1,6 @@
 ---
 name: gateway-startup
-description: Emit a startup log line when the ClawHarness plugin hooks are loaded.
+description: 在 ClawHarness 插件 hooks 被加载时输出一条启动日志。
 metadata:
   openclaw:
     events:
@@ -9,4 +9,4 @@ metadata:
 
 # gateway-startup
 
-Logs a short startup marker so operators can confirm the harness hook pack loaded.
+输出一条简短的启动标记，便于运维确认 harness hook 包已成功加载。

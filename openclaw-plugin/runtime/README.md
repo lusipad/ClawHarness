@@ -1,16 +1,16 @@
 # `openclaw-plugin/runtime`
 
-Status: skeleton
+状态：骨架已建立
 
-Purpose:
-- compose the runtime store, lock handling, dedupe, and audit helpers into the plugin layer
+用途：
+- 在插件层组合运行时存储、加锁、去重和审计辅助能力
 
-Planned subareas:
+规划中的子区域：
 - db
 - locks
 - events
 - audit
 
-Implementation note:
-- the executable bridge/runtime integration currently lives in the top-level Python package `harness_runtime/`
-- this keeps the OpenClaw native plugin bundle lightweight while the webhook bridge owns ingress, persistence, and wake-up dispatch
+实现说明：
+- 当前可执行的 bridge/runtime 集成仍位于顶层 Python 包 `harness_runtime/`
+- 这样可以让 OpenClaw 原生插件包保持轻量，同时由 webhook bridge 负责 ingress、持久化与唤醒分发

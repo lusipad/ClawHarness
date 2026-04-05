@@ -1,379 +1,348 @@
-# ClawHarness v1 Acceptance Test Specification
+# ClawHarness v1 验收测试规范
 
-Date: 2026-04-05
-Status: Acceptance baseline
-Companion to:
+日期：2026-04-05
+状态：验收基线
+配套文档：
 - `.omx/plans/prd-clawharness-v1-2026-04-05.md`
 - `.omx/plans/clawharness-master-plan-2026-04-05.md`
 
-## Baseline Sources
+## 基线来源
 
-- Core MVP acceptance and build order come from `.omx/plans/clawharness-master-plan-2026-04-05.md:379-426`.
-- Provider compatibility, workflow-stability rules, and deployment validation come from `.omx/plans/clawharness-support-matrix-2026-04-05.md:209-497`.
-- TaskFlow, skill, executor, deployment, security, and monitoring requirements come from `.omx/plans/clawharness-mvp-technical-design-2026-04-05.md:445-784`.
+- MVP 验收项与构建顺序来自总体主计划
+- Provider 兼容性、工作流稳定性规则和部署验证来自 support matrix
+- TaskFlow、skill、执行器、部署、安全与监控要求来自 MVP 技术设计
 
-## Acceptance Philosophy
+## 验收原则
 
-- Every acceptance criterion must be testable through observable evidence.
-- Shared flows are accepted only if they remain vendor-neutral and rely on unified capabilities.
-- Resume behavior is accepted only if the same run/session context is reused.
-- Docker and native support are both P0; neither can be deferred out of MVP closure.
-- P1 features such as `ado-mcp` or `rocketchat-bridge` must not be prerequisites for passing MVP acceptance.
+- 每条验收标准都必须能由可观察证据证明
+- 共享 flow 只有在保持供应商中立并依赖统一能力名时才算通过
+- 恢复行为只有在复用同一运行上下文时才算通过
+- Docker 与原生支持都属于 P0，不能在 MVP 收口前被移出
+- `ado-mcp`、`rocketchat-bridge` 等 P1 特性不能成为 MVP 验收前提
 
-## Test Levels
+## 测试层级
 
-### Level 1: Static and Artifact Validation
+### 第 1 层：静态与工件验证
 
-Purpose:
-Verify that required files, schemas, config templates, and flow references exist and are internally consistent.
+用途：
+- 验证必需文件、schema、配置模板和 flow 引用存在且自洽
 
-Required evidence:
-- schema files
-- provider and policy config templates
-- flow and skill definitions
-- deployment assets
+证据：
+- schema 文件
+- provider 与 policy 模板
+- flow 与 skill 定义
+- 部署资产
 
-### Level 2: Component Validation
+### 第 2 层：组件验证
 
-Purpose:
-Verify each module in isolation before attempting end-to-end flows.
+用途：
+- 在端到端执行前，先单独验证各模块
 
-Required evidence:
-- run-store tests for dedupe, locking, and status transitions
-- Azure DevOps adapter tests for task, PR, and CI operations
-- ACP executor tests for run, resume, and cancel behavior
-- Rocket.Chat notifier tests for webhook payload generation
+证据：
+- run-store 的去重、锁和状态迁移测试
+- Azure DevOps 适配器测试
+- ACP 执行器运行与恢复测试
+- Rocket.Chat 通知器测试
 
-### Level 3: Flow Integration Validation
+### 第 3 层：流程集成验证
 
-Purpose:
-Verify the main runtime loops.
+用途：
+- 验证主运行闭环
 
-Required evidence:
+证据：
 - `task-run` happy path
-- `pr-feedback` resume path
-- `ci-recovery` patch or escalate path
+- `pr-feedback` 恢复路径
+- `ci-recovery` 自动修复或升级路径
 
-### Level 4: Operational Validation
+### 第 4 层：运维验证
 
-Purpose:
-Verify the deployment, policy, and operability envelope.
+用途：
+- 验证部署、策略和可运维边界
 
-Required evidence:
-- Docker restart persistence
-- native service restart behavior
-- health checks
-- audit events
-- secret handling
+证据：
+- Docker 重启持久性
+- 原生服务重启行为
+- 健康检查
+- 审计事件
+- 密钥处理
 
-## Acceptance Criteria
+## 验收标准
 
-### AC-01: Single Task Claim and Dedupe
+### AC-01：单任务认领与去重
 
-Requirement:
-One eligible Azure DevOps task creates exactly one active run.
+要求：
+- 一个合格 Azure DevOps 任务只创建一个活动 run
 
-Given:
-- one eligible task event
-- one or more duplicate deliveries of the same event
+给定：
+- 一条合格任务事件
+- 同一事件的一次或多次重复投递
 
-When:
-- the event intake path normalizes and processes the event
+当：
+- 入站路径归一化并处理事件
 
-Then:
-- exactly one `TaskRun` is created
-- a lock is held by one owner only
-- duplicate deliveries are recorded as deduped events, not new runs
+则：
+- 只创建一个 `TaskRun`
+- 锁只被一个 owner 持有
+- 重复投递被记录为去重事件，而不是新 run
 
-Evidence:
-- runtime store record for the created run
-- dedupe record for replayed events
-- audit or logs showing one accepted claim and rejected duplicates
+证据：
+- runtime store 中的 run 记录
+- replay 事件的 dedupe 记录
+- 显示“一个认领成功、重复被拒绝”的审计或日志
 
-### AC-02: Structured Planning Output
+### AC-02：结构化规划输出
 
-Requirement:
-OpenClaw produces a structured plan for the task before coding.
+要求：
+- 在编码前先产出结构化计划
 
-Given:
-- a normalized task payload
-- repository context
+给定：
+- 归一化任务载荷
+- 仓库上下文
 
-When:
-- `analyze-task` executes
+当：
+- `analyze-task` 执行
 
-Then:
-- the output contains a plan summary
-- impacted files or modules are listed
-- missing information and risk level are explicit
+则：
+- 输出包含计划摘要
+- 明确列出受影响文件或模块
+- 明确暴露缺失信息与风险等级
 
-Evidence:
-- saved `analyze-task` output artifact
-- flow state showing transition into `planning`
+证据：
+- 保存的 `analyze-task` 工件
+- 显示进入 `planning` 状态的 flow 记录
 
-### AC-03: Codex ACP Coding Execution
+### AC-03：Codex ACP 编码执行
 
-Requirement:
-OpenClaw invokes Codex through ACP and receives structured execution output.
+要求：
+- OpenClaw 能通过 ACP 调起 Codex 并收到结构化执行结果
 
-Given:
-- a prepared workspace
-- executor input matching the documented contract
+给定：
+- 已准备好的工作区
+- 结构化计划或等价任务提示
 
-When:
-- `executor.run_coding_task` or resume is called
+当：
+- 编码执行被触发
 
-Then:
-- execution returns `status`, `summary`, `changed_files`, `checks`, and `follow_up`
-- the run remains tied to the same session and workspace
+则：
+- ACP 请求被成功发出
+- 执行结果包含 `status`、`summary`、`changed_files`、`checks`、`follow_up`
 
-Evidence:
-- executor result artifact
-- runtime mapping of `run_id`, `session_id`, and `workspace_path`
+证据：
+- ACP 请求记录
+- 执行结果工件
 
-### AC-04: Check Gate Before PR
+### AC-04：PR 前检查门禁
 
-Requirement:
-The main flow runs checks before branch push and PR creation.
+要求：
+- 在推送和开 PR 之前必须先跑本地检查
 
-Given:
-- a coding result with candidate file changes
+给定：
+- 已完成的代码修改
 
-When:
-- `task-run` reaches its verification stage
+当：
+- flow 尝试发布分支
 
-Then:
-- checks run before `vcs.commit_and_push`
-- failed checks block PR creation or force explicit escalation
+则：
+- 先执行检查
+- 只有检查通过才允许进入发布
+- 检查失败时 run 转入阻塞或人工处理状态
 
-Evidence:
-- ordered flow log or audit entries
-- check result artifact
-- absence of PR creation on failing checks
+证据：
+- `checks_completed` 审计记录
+- 检查命令输出
 
-### AC-05: Branch Push and PR Creation
+### AC-05：分支推送与 PR 创建
 
-Requirement:
-The system can create a branch and PR in the configured repository.
+要求：
+- 主流程必须能从任务分支走到 PR 创建
 
-Given:
-- a successful coding and checks stage
+给定：
+- 已通过检查的工作区修改
 
-When:
-- `task-run` reaches release actions
+当：
+- `task-run` 完成发布
 
-Then:
-- a task-scoped branch is created
-- code is pushed
-- a PR is opened
-- the run status becomes `awaiting_ci` or `awaiting_review`
+则：
+- 产生任务分支
+- 成功推送远端
+- 成功创建 PR
+- run 进入 `awaiting_review` 或 `awaiting_ci`
 
-Evidence:
-- branch name in run record
-- PR identifier in run record
-- provider adapter output for push and PR creation
+证据：
+- run 记录中的 branch 和 PR id
+- push 与 create PR 的适配器输出
 
-### AC-06: PR Feedback Resume
+### AC-06：PR 反馈恢复
 
-Requirement:
-A PR comment resumes the same run and session.
+要求：
+- PR 评论到来时，必须恢复到同一 run
 
-Given:
-- an existing run with `pr_id`
-- a new PR comment event
+给定：
+- 已有关联 `pr_id` 的 run
+- 一条新的 PR 评论事件
 
-When:
-- `pr-feedback` processes the event
+当：
+- `pr-feedback` 处理事件
 
-Then:
-- the system resolves `pr_id -> run_id`
-- the same session is resumed
-- unresolved review comments are processed
-- changes are pushed without creating a second run
+则：
+- 系统能解析 `pr_id -> run_id`
+- 使用同一 run 上下文继续处理
+- 处理未解决评论
+- 不创建第二个 run
 
-Evidence:
-- mapping lookup artifact
-- flow log for `pr-feedback`
-- unchanged `run_id` and `session_id`
+证据：
+- PR 到 run 的映射记录
+- `pr-feedback` 审计链
+- 未变化的 `run_id`
 
-### AC-07: CI Failure Recovery
+### AC-07：CI 失败恢复
 
-Requirement:
-A CI failure resumes the same run and either patches or escalates.
+要求：
+- CI 失败事件必须回到同一 run，并走“修补重试”或“升级人工”之一
 
-Given:
-- an existing run with `ci_run_id`
-- a failed CI event
+给定：
+- 已有关联 `ci_run_id` 的 run
+- 一条失败 CI 事件
 
-When:
-- `ci-recovery` processes the event
+当：
+- `ci-recovery` 处理事件
 
-Then:
-- the system resolves `ci_run_id -> run_id`
-- the same run is resumed
-- the result is either a patch-and-retry path or an `awaiting_human` escalation
+则：
+- 系统能解析 `ci_run_id -> run_id`
+- 恢复到同一 run
+- 最终结果是“修补并重试”或转入 `awaiting_human`
 
-Evidence:
-- CI lookup artifact
-- recovery decision record
-- retry output or escalation audit entry
+证据：
+- CI 到 run 的映射记录
+- 恢复决策记录
+- 重试输出或升级审计
 
-### AC-08: Rocket.Chat Lifecycle Notifications
+### AC-08：Rocket.Chat 生命周期通知
 
-Requirement:
-Rocket.Chat receives MVP lifecycle notifications.
+要求：
+- 生命周期事件应能送达 Rocket.Chat
 
-Given:
-- status transitions for started, PR opened, CI failed, blocked, and completed
+给定：
+- 已配置 webhook
+- started、PR opened、CI failed、blocked、completed 等事件
 
-When:
-- flows emit chat updates
+当：
+- 通知被触发
 
-Then:
-- webhook payloads are generated for each required event
-- delivery success or failure is recorded
+则：
+- 消息格式正确
+- 发送成功时可见
+- 发送失败不打断主业务路径
 
-Evidence:
-- notifier payload fixtures or integration logs
-- audit entries for sent notifications
+证据：
+- notifier 测试
+- webhook 调用记录
+- 失败场景审计
 
-### AC-09: Docker Deployment Support
+### AC-09：Docker 部署支持
 
-Requirement:
-The MVP bundle runs in Docker with persistent runtime state.
+要求：
+- 项目必须可通过 Docker 启动
 
-Given:
-- the Docker deployment profile
+给定：
+- Docker 可用
+- 配置和密钥齐备
 
-When:
-- services are started, stopped, and restarted
+当：
+- 启动 compose 栈
 
-Then:
-- SQLite state survives restart
-- plugin artifacts remain available
-- the ACP executor can reach the workspace
-- chat notifications can still be delivered
+则：
+- gateway 和 bridge 能启动
+- 基本健康检查通过
 
-Evidence:
-- Docker smoke test results
-- persisted runtime records after restart
-- health check results
+证据：
+- compose 资产
+- 健康检查输出
 
-### AC-10: Native Deployment Support
+### AC-10：原生部署支持
 
-Requirement:
-The same bundle runs through native service installation.
+要求：
+- 项目必须支持原生安装方式
 
-Given:
-- the native deployment profile
+给定：
+- Windows 或 Linux 原生环境
 
-When:
-- services are installed and restarted
+当：
+- 按部署脚本安装并启动
 
-Then:
-- OpenClaw starts cleanly
-- runtime store permissions are correct
-- the service wrapper survives reboot or simulated restart
-- the webhook listener is reachable if a bridge is required
+则：
+- gateway / bridge 能在原生环境运行
+- 可重新启动并恢复配置
 
-Evidence:
-- native install script results
-- service status output
-- health check or listener reachability proof
+证据：
+- systemd / Windows 资产
+- 原生环境验证记录
 
-### AC-11: Workflow-Stability Rule
+### AC-11：工作流稳定性规则
 
-Requirement:
-Shared flows remain provider-neutral.
+要求：
+- flow 必须依赖统一能力名，而不是供应商特定调用
 
-Given:
-- all flow definitions
+给定：
+- 插件 flow 定义
 
-When:
-- the flows are reviewed before release
+当：
+- 审查 flow 契约
 
-Then:
-- flows reference only unified capability names
-- vendor-specific call names do not appear in shared flow logic
+则：
+- 共享 flow 不直接依赖 `ado.*`、`rocketchat.*`、`codex.*` 之类供应商专用动作名
 
-Evidence:
-- flow review checklist
-- static search results proving absence of forbidden names
+证据：
+- 静态检查结果
+- flow 定义
 
-### AC-12: Security and Policy Guardrails
+### AC-12：安全与策略护栏
 
-Requirement:
-The MVP respects the stated v1 policy boundaries.
+要求：
+- V1 必须具备最小可执行的策略护栏
 
-Given:
-- configured repositories and deployment environment
+给定：
+- 部署配置
+- 仓库策略约束
 
-When:
-- the system performs coding and PR operations
+当：
+- 运行主链路或恢复链路
 
-Then:
-- no direct push to protected branches occurs
-- merge automation is absent
-- provider secrets come from environment or secret files
-- service identities are separated by function
+则：
+- 不允许绕过受保护分支规则
+- 不允许直接合并
+- 密钥通过环境变量或等价安全方式注入
 
-Evidence:
-- branch policy config
-- deployment config review
-- secret-loading documentation and smoke checks
+证据：
+- policy 配置
+- 部署环境变量验证
+- 策略相关实现说明
 
-### AC-13: Observability and Audit
+### AC-13：可观测性与审计
 
-Requirement:
-Operators can understand run health and investigate failures.
+要求：
+- 关键运行节点必须留下可追踪证据
 
-Given:
-- normal and failure scenarios
+给定：
+- 一次完整运行或恢复链路
 
-When:
-- runs progress across the main flows
+当：
+- flow 执行
 
-Then:
-- run lifecycle, duplicate suppression, lock contention, and executor failures are visible
-- audit records exist for claims, fallbacks, retries, and human handoffs
+则：
+- run、状态迁移、检查、发布、阻塞等关键事件有审计记录
+- 健康检查和基本运维入口存在
 
-Evidence:
-- metrics output or logs
-- audit records for sample runs
+证据：
+- SQLite 审计库
+- 审计链条
+- 健康检查脚本
 
-## Verification Sequence
+## 当前 live 结论
 
-1. Run Level 1 static validation before any integration testing.
-2. Run Level 2 component validation for `run_store`, `ado_client`, `codex_acp_runner`, and `rocketchat_notifier`.
-3. Run Level 3 flow tests in this order: `task-run`, `pr-feedback`, `ci-recovery`.
-4. Run Level 4 operational checks for Docker and native profiles.
-5. Re-run the affected acceptance criteria after every failed check and fix.
+截至 `2026-04-05`：
 
-## Exit Criteria
-
-The MVP is accepted only when all of the following are true:
-
-- AC-01 through AC-13 pass.
-- No P0 or P1 defect remains open against the accepted scope.
-- Both Docker and native profiles have evidence bundles.
-- Shared flows satisfy the workflow-stability rule.
-- Resume paths prove stable `run_id` reuse.
-- Security and policy constraints are verified, not assumed.
-
-## Failure Handling Rules
-
-- A failed Level 1 or Level 2 check blocks downstream flow validation.
-- A failed `task-run` check blocks PR feedback and CI recovery sign-off.
-- A failed Docker or native operational check blocks MVP closure.
-- A resume-path bug is treated as release-blocking because it breaks the core OpenClaw continuation model.
-
-## Evidence Package Template
-
-Each completed cycle should deposit or reference:
-
-- changed files
-- executed verification steps
-- pass/fail result per acceptance criterion
-- raw evidence locations
-- residual risks
-- follow-up backlog items
+- AC-01 至 AC-06 已有本地或真实环境证据
+- AC-06 已完成真实环境闭环
+- AC-07 实现完成并本地验证通过，但 live 验证被目标项目缺少 CI builds 阻塞
+- AC-09 至 AC-13 仍需按环境继续逐项收口

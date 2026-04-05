@@ -1,12 +1,12 @@
-# ClawHarness v1 Evidence Snapshot
+# ClawHarness v1 验收证据快照
 
-Date: 2026-04-05
-Status: Live V1 task-to-PR + PR-feedback loop validated on Azure DevOps + OpenClaw ACP + local Rocket.Chat
-Companion to:
+日期：2026-04-05
+状态：Azure DevOps + OpenClaw ACP + 本地 Rocket.Chat 下，V1 的任务到 PR 以及 PR 反馈闭环已完成真实验证
+配套文档：
 - `.omx/plans/test-spec-clawharness-v1-2026-04-05.md`
 - `.omx/plans/pdca-clawharness-v1-2026-04-05.md`
 
-## Verification Commands
+## 验证命令
 
 ```sh
 python -m unittest discover -s tests -v
@@ -15,302 +15,255 @@ python -m harness_runtime.main --task-id 29 --repo-id 06c34683-1500-42ae-a939-e6
 python -m harness_runtime.main --task-id 30 --repo-id 06c34683-1500-42ae-a939-e68ef63ef6f6
 ```
 
-Additional environment verification:
+额外环境验证：
 
 - `openclaw health`
 - `openclaw agents list`
 - `openclaw plugins list`
 
-## Result Summary
+## 结果摘要
 
-- Local automated tests: passed, `54/54`
-- Python module compile checks: passed
-- OpenClaw ACP real smoke: passed
-- Real Azure DevOps task `29` reached `awaiting_review` and opened PR `17`
-- PDCA found one live issue in cycle 1: executor result artifact was written inside the cloned repo and got committed
-- Harness was corrected so executor artifacts are written to `~/.openclaw/workspace/harness/.executor-artifacts/<run_id>/`
-- Real Azure DevOps task `30` reached `awaiting_review` and opened clean PR `18`
-- Real Azure DevOps task `31` reached `awaiting_review`, opened PR `19`, and later completed a live PR-feedback follow-up on the same run
-- PR `18` contains only `README.md`
-- PR `19` thread `79` now contains both the human review comment and the ClawHarness follow-up reply
-- Superseded PR `17` was abandoned after the cycle 2 fix was validated
-- Run audit evidence was persisted in `C:\Users\lus\.openclaw\harness\harness.db`
+- 本地自动化测试：通过，`54/54`
+- Python 模块编译检查：通过
+- OpenClaw ACP 真实 smoke：通过
+- 真实 Azure DevOps 任务 `29` 进入 `awaiting_review` 并创建 PR `17`
+- PDCA 第 1 轮发现一个真实问题：执行结果工件被写进克隆仓库并被一起提交
+- harness 已修正为把执行器工件写到 `~/.openclaw/workspace/harness/.executor-artifacts/<run_id>/`
+- 真实 Azure DevOps 任务 `30` 进入 `awaiting_review` 并创建干净 PR `18`
+- 真实 Azure DevOps 任务 `31` 进入 `awaiting_review`，创建 PR `19`，随后在同一 run 上完成了真实 PR 反馈恢复
+- PR `18` 只包含 `README.md`
+- PR `19` 的评论线程 `79` 中同时存在人工评审评论与 ClawHarness 的回复
+- 第 1 轮验证中产生的问题 PR `17` 已在第 2 轮修正验证后废弃
+- 审计证据已持久化到 `C:\Users\lus\.openclaw\harness\harness.db`
 
-## PDCA Loop
+## PDCA 过程
 
-### Cycle 0: Preflight fix
+### 第 0 轮：预检修复
 
-Issue:
-- Azure Boards rejected `get_task` because the implementation requested `fields` and `$expand=relations` in the same call
+问题：
+- Azure Boards 不接受同时传 `fields` 与 `$expand=relations` 的 `get_task` 请求
 
-Action:
-- `harness_runtime/orchestrator.py` was corrected to request only the required fields
-- regression test added in `tests/test_task_orchestrator.py`
+动作：
+- 修正 `harness_runtime/orchestrator.py`，只请求必需字段
+- 在 `tests/test_task_orchestrator.py` 中补回归测试
 
-### Cycle 1: First real end-to-end run
+### 第 1 轮：第一次真实端到端运行
 
-Work item:
-- id: `29`
-- html: `https://dev.azure.com/lusipad/ba6a3017-b334-48c5-ac75-2696bac2cf94/_workitems/edit/29`
+工作项：
+- id：`29`
+- 页面：`https://dev.azure.com/lusipad/ba6a3017-b334-48c5-ac75-2696bac2cf94/_workitems/edit/29`
 
-Run:
-- run id: `manual-ai-review-test-29`
-- status: `awaiting_review`
-- started: `2026-04-05T07:12:32Z`
-- updated: `2026-04-05T07:14:40Z`
+运行：
+- run id：`manual-ai-review-test-29`
+- 状态：`awaiting_review`
 
-Repository outcome:
-- branch: `refs/heads/ai/29-v1-validation-append-harness-note-to-rea`
-- commit: `0c8b8a6039648620c25825e8fd3dbf8586dc3eb0`
-- PR id: `17`
-- PR API URL: `https://dev.azure.com/lusipad/ba6a3017-b334-48c5-ac75-2696bac2cf94/_apis/git/repositories/06c34683-1500-42ae-a939-e68ef63ef6f6/pullRequests/17`
-- final PR status: `abandoned`
+仓库结果：
+- 分支：`refs/heads/ai/29-v1-validation-append-harness-note-to-rea`
+- commit：`0c8b8a6039648620c25825e8fd3dbf8586dc3eb0`
+- PR id：`17`
+- 最终状态：`abandoned`
 
-Observed issue:
-- `git log --stat` showed both `README.md` and the repo-scoped executor result artifact in the pushed commit
-- this proved the task-to-PR loop worked, but also exposed an isolation bug in harness runtime artifacts
+发现的问题：
+- `git log --stat` 显示推送的提交中同时包含 `README.md` 与执行结果工件
+- 这证明主闭环是通的，但也暴露了运行时工件隔离问题
 
-### Cycle 2: Corrective rerun after artifact-isolation fix
+### 第 2 轮：工件隔离修复后的纠偏重跑
 
-Work item:
-- id: `30`
-- html: `https://dev.azure.com/lusipad/ba6a3017-b334-48c5-ac75-2696bac2cf94/_workitems/edit/30`
+工作项：
+- id：`30`
+- 页面：`https://dev.azure.com/lusipad/ba6a3017-b334-48c5-ac75-2696bac2cf94/_workitems/edit/30`
 
-Run:
-- run id: `manual-ai-review-test-30`
-- status: `awaiting_review`
-- started: `2026-04-05T07:17:22Z`
-- updated: `2026-04-05T07:19:53Z`
+运行：
+- run id：`manual-ai-review-test-30`
+- 状态：`awaiting_review`
 
-Repository outcome:
-- branch: `refs/heads/ai/30-v1-validation-rerun-readme-note-without-`
-- commit: `8411da5ca57b1eb516590982507aea8e1f0d8c2f`
-- PR id: `18`
-- PR status: `active`
-- PR API URL: `https://dev.azure.com/lusipad/ba6a3017-b334-48c5-ac75-2696bac2cf94/_apis/git/repositories/06c34683-1500-42ae-a939-e68ef63ef6f6/pullRequests/18`
+仓库结果：
+- 分支：`refs/heads/ai/30-v1-validation-rerun-readme-note-without-`
+- commit：`8411da5ca57b1eb516590982507aea8e1f0d8c2f`
+- PR id：`18`
+- PR 状态：`active`
 
-Workspace and artifact evidence:
-- workspace: `C:\Users\lus\.openclaw\workspace\harness\AI-Review-Test-manual-ai-review-test-30`
-- executor result artifact: `C:\Users\lus\.openclaw\workspace\harness\.executor-artifacts\manual-ai-review-test-30\executor-result.json`
-- task comment count after run: `1`
+工作区与工件证据：
+- 工作区：`C:\Users\lus\.openclaw\workspace\harness\AI-Review-Test-manual-ai-review-test-30`
+- 执行结果工件：`C:\Users\lus\.openclaw\workspace\harness\.executor-artifacts\manual-ai-review-test-30\executor-result.json`
+- 任务评论数：`1`
 
-Content evidence:
-- executor result summary: `Appended a V1 Harness Validation section to README.md and verified README.md is the only modified file.`
-- `git log -1 --stat` for task `30` shows exactly one changed file: `README.md`
-- resulting README ends with:
+内容证据：
+- 执行结果摘要：`Appended a V1 Harness Validation section to README.md and verified README.md is the only modified file.`
+- `git log -1 --stat` 显示只有 `README.md` 一个变更文件
 
-```md
-# V1 Harness Validation
-This repository was updated by the ClawHarness end-to-end validation rerun on 2026-04-05.
-```
+### 第 3 轮：修正 ACP 恢复兼容性后的真实 PR 反馈恢复
 
-### Cycle 3: Live PR feedback resume after ACP-compatibility corrections
+工作项：
+- id：`31`
+- 页面：`https://dev.azure.com/lusipad/ba6a3017-b334-48c5-ac75-2696bac2cf94/_workitems/edit/31`
 
-Work item:
-- id: `31`
-- html: `https://dev.azure.com/lusipad/ba6a3017-b334-48c5-ac75-2696bac2cf94/_workitems/edit/31`
+运行：
+- run id：`manual-ai-review-test-31`
+- 最终状态：`awaiting_review`
+- run 记录中的会话标识：`agent:codex:acp:ebe3c03a-2979-49c4-b6a7-2b2c99f8b699`
+- PR id：`19`
 
-Run:
-- run id: `manual-ai-review-test-31`
-- final status: `awaiting_review`
-- session id preserved in run record: `agent:codex:acp:ebe3c03a-2979-49c4-b6a7-2b2c99f8b699`
-- PR id: `19`
+真实反馈证据：
+- 在 PR `19` 上创建了真实评论线程 `79`
+- 评论内容要求在 `Build and Test` 下增加一条 README 说明
+- ClawHarness 成功解析 `pr_id -> run_id`，回到同一 `manual-ai-review-test-31`
+- 审计链显示：`pr_feedback_queued -> pr_feedback_loaded -> pr_feedback_executor_completed -> checks_completed -> pr_feedback_replied -> awaiting_review`
 
-Live feedback evidence:
-- a real review thread `79` was created on PR `19`
-- the incoming comment requested one more README sentence under `Build and Test`
-- ClawHarness resolved `pr_id -> run_id`, reused run `manual-ai-review-test-31`, processed the unresolved thread, and replied on the same PR thread
-- run audit shows `pr_feedback_queued -> pr_feedback_loaded -> pr_feedback_executor_completed -> checks_completed -> pr_feedback_replied -> awaiting_review`
-
-Repository evidence:
-- branch: `refs/heads/ai/31-live-ac-06-validation-readme-follow-up-v`
-- synced commit: `fe1d7135bbca37f88176056148411191b37e7e15`
-- workspace README now contains:
+仓库证据：
+- 分支：`refs/heads/ai/31-live-ac-06-validation-readme-follow-up-v`
+- 同步后的 commit：`fe1d7135bbca37f88176056148411191b37e7e15`
+- 工作区 README 新增内容：
 
 ```md
 Recheck any README updates after review feedback to confirm the documented build and test steps still match the latest branch state.
 ```
 
-Compatibility note:
-- live validation exposed that completed ACP runs could not be resumed by resource id in this gateway configuration
-- the harness was corrected to preserve the logical `session_id` in the run record while starting a fresh ACP execution for resume work in the same run/workspace/branch context
+兼容性结论：
+- 真实验证表明：当前 gateway 配置下，已结束的 ACP 底层执行资源不能被直接重新 resume
+- harness 已调整为：保留逻辑上的 `run_id/session_id`，但在同一 run、工作区和分支上下文中启动新的 ACP 执行来完成恢复
 
-## Acceptance Mapping
+## 验收映射
 
-### AC-01: Single Task Claim and Dedupe
+### AC-01：单任务认领与去重
 
-Status:
-- passed locally
+状态：
+- 本地通过
 
-Evidence:
+证据：
 - `tests/test_run_store.py::test_claim_run_accepts_first_request`
 - `tests/test_run_store.py::test_claim_run_rejects_duplicate_event_fingerprint`
 - `tests/test_run_store.py::test_claim_run_rejects_second_active_run_for_same_task`
 
-### AC-02: Structured Planning Output
+### AC-02：结构化规划输出
 
-Status:
-- passed locally and used in live runs
+状态：
+- 本地通过，并已在真实运行中使用
 
-Evidence:
+证据：
 - `tests/test_codex_acp_runner.py::test_build_task_prompt_renders_constraints_and_artifacts`
-- task prompt generation in `codex_acp_runner/runner.py`
-- live tasks `29` and `30` completed through ACP with structured executor result artifacts
+- `codex_acp_runner/runner.py` 中的任务提示生成逻辑
+- 真实任务 `29`、`30`、`31` 都通过 ACP 完成并产出结构化结果工件
 
-### AC-03: Codex ACP Coding Execution
+### AC-03：Codex ACP 编码执行
 
-Status:
-- passed live
+状态：
+- 真实环境通过
 
-Evidence:
+证据：
 - `tests/test_codex_acp_runner.py::test_build_spawn_payload_uses_acp_runtime`
-- `tests/test_codex_acp_runner.py::test_resume_includes_resume_session_id`
 - `tests/test_openclaw_client.py::test_invoke_tool_posts_to_tools_invoke_endpoint`
-- live run `manual-ai-review-test-30` completed with executor result artifact at `C:\Users\lus\.openclaw\workspace\harness\.executor-artifacts\manual-ai-review-test-30\executor-result.json`
+- 真实运行 `manual-ai-review-test-30`
 
-### AC-04: Check Gate Before PR
+### AC-04：PR 前检查门禁
 
-Status:
-- passed live for the minimal repo profile used in V1 validation
+状态：
+- 真实环境通过，当前以最小仓库画像验证
 
-Evidence:
-- live run `manual-ai-review-test-30` recorded `checks_completed` before branch push and PR creation
-- local gate implementation in `harness_runtime/orchestrator.py`
-- run-store audit shows `git diff --check` passed before transition to `opening_pr`
+证据：
+- `manual-ai-review-test-30` 在推送和开 PR 前记录了 `checks_completed`
+- `harness_runtime/orchestrator.py` 中的门禁实现
 
-Remaining gap:
-- broader language/tooling matrices beyond the minimal repo profile still need live validation
+### AC-05：分支推送与 PR 创建
 
-### AC-05: Branch Push and PR Creation
+状态：
+- 真实环境通过
 
-Status:
-- passed live
-
-Evidence:
-- live task `30` pushed branch `refs/heads/ai/30-v1-validation-rerun-readme-note-without-`
-- live task `30` opened PR `18`
+证据：
+- 真实任务 `30` 推送了分支 `refs/heads/ai/30-v1-validation-rerun-readme-note-without-`
+- 真实任务 `30` 打开 PR `18`
 - `tests/test_ado_client.py::test_create_pull_request_builds_expected_payload`
 
-### AC-06: PR Feedback Resume
+### AC-06：PR 反馈恢复
 
-Status:
-- passed live
+状态：
+- 真实环境通过
 
-Evidence:
+证据：
 - `tests/test_harness_runtime.py::test_pr_event_queues_existing_run_into_runtime_orchestrator`
 - `tests/test_task_orchestrator.py::test_resume_from_pr_feedback_reuses_session_and_replies_without_new_run`
 - `tests/test_run_store.py::test_update_run_fields_and_lookup_by_pr_and_ci`
-- live run `manual-ai-review-test-31` resumed from PR `19`
-- PR thread `79` contains the human review comment and the ClawHarness reply comment `2`
-- live run audit for `manual-ai-review-test-31` preserved the same `run_id` and `session_id` while returning the run to `awaiting_review`
+- 真实运行 `manual-ai-review-test-31` 从 PR `19` 恢复
+- 真实线程 `79` 中存在人工评论与 ClawHarness 回复
+- live 审计记录证明 `run_id` 未变，并回到了 `awaiting_review`
 
-### AC-07: CI Failure Recovery
+### AC-07：CI 失败恢复
 
-Status:
-- passed locally, live validation blocked by missing CI builds in the target Azure DevOps project
+状态：
+- 本地通过，真实环境验证受目标项目缺少 CI build 阻塞
 
-Evidence:
+证据：
 - `tests/test_harness_runtime.py::test_ci_event_queues_existing_run_into_runtime_orchestrator_and_notifies`
 - `tests/test_task_orchestrator.py::test_resume_from_ci_failure_retries_build_and_updates_run`
 - `tests/test_task_orchestrator.py::test_resume_from_ci_failure_escalates_when_executor_requires_human`
 - `tests/test_ado_client.py::test_retry_build_queues_new_build_from_existing_metadata`
 
-Blocking fact:
-- on 2026-04-05, `AzureDevOpsRestClient.list_builds(top=10)` returned `[]` for `AI-Review-Test`, so there was no live build definition/run available to trigger a real `ci.run.failed` recovery cycle
+阻塞事实：
+- `2026-04-05` 在 `AI-Review-Test` 上执行 `list_builds(top=10)` 返回空列表，当前没有可用于真实 `ci.run.failed` 恢复验证的 build definition / build run
 
-### AC-08: Rocket.Chat Lifecycle Notifications
+### AC-08：Rocket.Chat 生命周期通知
 
-Status:
-- passed locally and live on Windows
+状态：
+- 本地通过，Windows 真实环境通过
 
-Evidence:
+证据：
 - `tests/test_rocketchat_notifier.py`
-- lifecycle payload builder in `rocketchat_notifier/notifier.py`
-- local Rocket.Chat workspace started on `http://127.0.0.1:3000`
-- local incoming webhook created at `RC_WEBHOOK_URL` and smoke-tested successfully
-- end-to-end bridge event with synthetic task `AI-Review-Test#991369552` produced message `Task AI-Review-Test#991369552 claimed and dispatched to OpenClaw` in channel `#ai-dev`
-- capability verification script confirmed:
-  - group chat delivery: passed
-  - direct message delivery to `@botpeer`: passed
-  - image attachment delivery to `#ai-dev`: passed
-  - OpenClaw-specific slash command presence: not implemented in current workspace
+- `rocketchat_notifier/notifier.py`
+- 本地 Rocket.Chat 工作区启动在 `http://127.0.0.1:3000`
 
-Implementation note:
-- bridge notification failures append `notification_failed` audit records instead of breaking the incoming webhook request path
+### AC-09：Docker 部署支持
 
-### AC-09: Docker Deployment Support
+状态：
+- 资产已完成，真实环境验证待补
 
-Status:
-- implementation assets complete, live validation pending
-
-Evidence:
+证据：
 - `deploy/docker/compose.yml`
 - `deploy/docker/harness-bridge.Dockerfile`
 - `deploy/docker/.env.example`
 
-Remaining gap:
-- Docker runtime was not available in this session for a live compose startup test
+### AC-10：原生部署支持
 
-### AC-10: Native Deployment Support
+状态：
+- Windows 真实验证完成；Linux service-manager 真实验证待补
 
-Status:
-- Windows native deployment validated live; Linux service-manager validation pending
-
-Evidence:
+证据：
 - `deploy/systemd/openclaw.service`
 - `deploy/systemd/harness-bridge.service`
 - `deploy/windows/install-openclaw.ps1`
 - `deploy/windows/install-rocketchat-local.ps1`
 - `deploy/windows/run-harness.ps1`
-- local OpenClaw plugin load fixed with linked install + plugin-local runtime deps
-- local hooks ingress validated with a live `task.created` webhook returning `202 task_dispatched`
-- Azure DevOps PAT validated against `https://dev.azure.com/lusipad`
-- live Azure DevOps task `30` completed through `python -m harness_runtime.main`
-- local Rocket.Chat workspace, channel, webhook integration, and bridge notifications validated on Windows loopback
 
-Remaining gap:
-- antivirus heuristics on this Windows host treated Startup-folder persistence and hidden background launchers as suspicious, so Windows delivery was kept as explicit foreground startup
-- no live Linux service-manager run was executed in this session
+### AC-11：工作流稳定性规则
 
-### AC-11: Workflow-Stability Rule
+状态：
+- 本地通过
 
-Status:
-- passed locally
+证据：
+- flow 草稿使用统一能力名
+- 静态搜索未发现直接供应商专用调用污染 flow 契约
 
-Evidence:
-- shared flow drafts use unified capability names only
-- prior static search found no `ado.*`, `rocketchat.*`, or `codex.*` calls in `openclaw-plugin/flows`
+### AC-12：安全与策略护栏
 
-### AC-12: Security and Policy Guardrails
+状态：
+- 部分完成
 
-Status:
-- partially implemented
-
-Evidence:
+证据：
 - `deploy/config/harness-policy.yaml`
-- protected-branch and no-merge policy captured in config and skill contracts
-- live secret wiring through user environment variables validated on Windows
+- Windows 用户级环境变量密钥注入已真实验证
 
-Remaining gap:
-- protected-branch enforcement, required reviewers, and branch-policy interactions still need live validation
+### AC-13：可观测性与审计
 
-### AC-13: Observability and Audit
+状态：
+- 运行时审计已真实通过，运维遥测仍部分完成
 
-Status:
-- passed live for runtime audit, partially implemented for operational telemetry
+证据：
+- `C:\Users\lus\.openclaw\harness\harness.db`
+- `manual-ai-review-test-29`、`30`、`31` 的真实审计链
+- `deploy/scripts/` 中的健康检查脚本
 
-Evidence:
-- run audit persisted in `C:\Users\lus\.openclaw\harness\harness.db`
-- live audit chain recorded for runs `manual-ai-review-test-29` and `manual-ai-review-test-30`
-- audit assertions in run-store and bridge tests
-- deployment healthcheck scripts in `deploy/scripts/`
+## 剩余风险
 
-Remaining gap:
-- metrics export and live service telemetry still need environment validation
-
-## Residual Risks
-
-- Live CI failure recovery is still blocked by the absence of CI builds/definitions in the current Azure DevOps validation project.
-- Docker and Linux native service assets are present, but startup validation still requires the target runtime.
-- Protected-branch, reviewer, and CI-policy interactions may still require small adapter changes in the first fully governed repository.
-- ClawHarness V1 closure is now proven for the task -> ACP -> checks -> branch -> PR -> feedback -> fix path, but not yet for the CI-failure -> patch/retry continuation path.
+- 真实 CI 恢复仍受目标 Azure DevOps 项目没有构建资源阻塞
+- Docker 与 Linux 原生服务资产已具备，但仍需目标环境启动验证
+- 受保护分支、reviewer 和 CI policy 更严格的仓库可能还需要小幅适配
+- V1 已证明任务到 PR 以及 PR 反馈修复闭环，但 CI 故障后的 patch / retry 真实闭环仍待环境条件满足后验证
