@@ -40,7 +40,41 @@ class RecordingTaskOrchestrator:
         self.event = threading.Event()
 
     def run_claimed_task(self, run_id: str, *, task_context: dict[str, object]) -> None:
-        self.calls.append({"run_id": run_id, "task_context": task_context})
+        self.calls.append({"method": "run_claimed_task", "run_id": run_id, "task_context": task_context})
+        self.event.set()
+
+    def resume_from_pr_feedback(
+        self,
+        run_id: str,
+        *,
+        comments: list[dict[str, object]],
+        event_payload: dict[str, object],
+    ) -> None:
+        self.calls.append(
+            {
+                "method": "resume_from_pr_feedback",
+                "run_id": run_id,
+                "comments": comments,
+                "event_payload": event_payload,
+            }
+        )
+        self.event.set()
+
+    def resume_from_ci_failure(
+        self,
+        run_id: str,
+        *,
+        build_summary: dict[str, object],
+        event_payload: dict[str, object],
+    ) -> None:
+        self.calls.append(
+            {
+                "method": "resume_from_ci_failure",
+                "run_id": run_id,
+                "build_summary": build_summary,
+                "event_payload": event_payload,
+            }
+        )
         self.event.set()
 
 
@@ -438,7 +472,17 @@ runtime:
         audit_events = [entry["event_type"] for entry in self.store.list_audit("run-1")]
         self.assertEqual(["run_claimed", "status_transition", "openclaw_dispatch", "notification_failed"], audit_events)
 
-    def test_pr_event_resumes_existing_run(self) -> None:
+    def test_pr_event_queues_existing_run_into_runtime_orchestrator(self) -> None:
+        task_orchestrator = RecordingTaskOrchestrator()
+        bridge = HarnessBridge(
+            config=self.config,
+            store=self.store,
+            ado_client=self.ado_client,
+            openclaw_client=self.openclaw_client,
+            notifier=self.notifier,
+            task_orchestrator=task_orchestrator,
+            run_id_factory=lambda: "run-pr-1",
+        )
         self.store.create_run(
             TaskRun(
                 run_id="run-2",
@@ -452,6 +496,7 @@ runtime:
                 status="awaiting_review",
             )
         )
+        self.ado_transport.responses.clear()
         self.ado_transport.queue_json(
             {
                 "value": [
@@ -464,7 +509,7 @@ runtime:
             }
         )
 
-        result = self.bridge.handle_ado_event(
+        result = bridge.handle_ado_event(
             event_type="pr.comment.created",
             source_id="evt-pr-1",
             payload={
@@ -476,11 +521,29 @@ runtime:
         )
 
         self.assertTrue(result.accepted)
-        self.assertEqual("pr_feedback_dispatched", result.action)
+        self.assertEqual("pr_feedback_queued", result.action)
+        self.assertTrue(task_orchestrator.event.wait(1.0))
+        self.assertEqual("resume_from_pr_feedback", task_orchestrator.calls[0]["method"])
+        self.assertEqual("run-2", task_orchestrator.calls[0]["run_id"])
+        self.assertEqual(1, len(task_orchestrator.calls[0]["comments"]))
+        self.assertEqual("pr.comment.created", task_orchestrator.calls[0]["event_payload"]["event_type"])
         run = self.store.get_run("run-2")
-        self.assertEqual("coding", run.status)
+        self.assertEqual("awaiting_review", run.status)
+        self.assertEqual([], self.openclaw_transport.calls)
+        audit_events = [entry["event_type"] for entry in self.store.list_audit("run-2")]
+        self.assertIn("pr_feedback_queued", audit_events)
 
-    def test_ci_event_resumes_existing_run_and_notifies(self) -> None:
+    def test_ci_event_queues_existing_run_into_runtime_orchestrator_and_notifies(self) -> None:
+        task_orchestrator = RecordingTaskOrchestrator()
+        bridge = HarnessBridge(
+            config=self.config,
+            store=self.store,
+            ado_client=self.ado_client,
+            openclaw_client=self.openclaw_client,
+            notifier=self.notifier,
+            task_orchestrator=task_orchestrator,
+            run_id_factory=lambda: "run-ci-1",
+        )
         self.store.create_run(
             TaskRun(
                 run_id="run-3",
@@ -493,6 +556,7 @@ runtime:
                 status="awaiting_ci",
             )
         )
+        self.ado_transport.responses.clear()
         self.ado_transport.queue_json(
             {
                 "id": 99,
@@ -502,7 +566,7 @@ runtime:
             }
         )
 
-        result = self.bridge.handle_ado_event(
+        result = bridge.handle_ado_event(
             event_type="ci.run.failed",
             source_id="evt-ci-1",
             payload={
@@ -515,11 +579,19 @@ runtime:
         )
 
         self.assertTrue(result.accepted)
-        self.assertEqual("ci_recovery_dispatched", result.action)
+        self.assertEqual("ci_recovery_queued", result.action)
+        self.assertTrue(task_orchestrator.event.wait(1.0))
+        self.assertEqual("resume_from_ci_failure", task_orchestrator.calls[0]["method"])
+        self.assertEqual("run-3", task_orchestrator.calls[0]["run_id"])
+        self.assertEqual("ci.run.failed", task_orchestrator.calls[0]["event_payload"]["event_type"])
+        self.assertEqual(99, task_orchestrator.calls[0]["build_summary"]["id"])
         run = self.store.get_run("run-3")
-        self.assertEqual("coding", run.status)
+        self.assertEqual("awaiting_ci", run.status)
+        self.assertEqual([], self.openclaw_transport.calls)
         notify_payload = json.loads(self.chat_transport.calls[0]["body"].decode("utf-8"))
-        self.assertEqual("CI failure for AB#123 dispatched to OpenClaw", notify_payload["text"])
+        self.assertEqual("CI failure for AB#123 queued for recovery", notify_payload["text"])
+        audit_events = [entry["event_type"] for entry in self.store.list_audit("run-3")]
+        self.assertIn("ci_recovery_queued", audit_events)
 
 
 if __name__ == "__main__":

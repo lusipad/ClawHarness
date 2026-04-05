@@ -213,6 +213,7 @@ class RunStoreTests(unittest.TestCase):
         created_run = self.store.create_run(make_run())
         updated = self.store.update_run_fields(
             created_run.run_id,
+            session_id="session-updated",
             branch_name="ai/ado/AB#123/abc123",
             workspace_path="/tmp/run-1",
             pr_id="42",
@@ -223,6 +224,7 @@ class RunStoreTests(unittest.TestCase):
 
         self.assertEqual("42", updated.pr_id)
         self.assertEqual("99", updated.ci_run_id)
+        self.assertEqual("session-updated", updated.session_id)
         self.assertEqual(updated, self.store.find_run_by_pr_id("42"))
         self.assertEqual(updated, self.store.find_run_by_ci_run_id("99"))
 

@@ -155,23 +155,45 @@ class HarnessBridge:
         comments = []
         if normalized.repo_id:
             comments = self.ado_client.list_pull_request_comments(normalized.repo_id, normalized.pr_id or "")
-        prompt = self._build_pr_prompt(normalized, run.run_id, comments)
-        self.openclaw_client.run_agent(
-            message=prompt,
-            name="Azure DevOps PR Feedback",
-            agent_id=self.config.openclaw_hooks.agent_id,
-            session_key=run.session_id,
-            wake_mode=self.config.openclaw_hooks.wake_mode,
-            deliver=False,
-            timeout_seconds=self.config.executor.timeout_seconds,
-        )
-        self._safe_transition(run.run_id, to_status="coding", expected_from=("awaiting_review", "awaiting_ci", "planning"))
+        if self.task_orchestrator is None:
+            prompt = self._build_pr_prompt(normalized, run.run_id, comments)
+            self.openclaw_client.run_agent(
+                message=prompt,
+                name="Azure DevOps PR Feedback",
+                agent_id=self.config.openclaw_hooks.agent_id,
+                session_key=run.session_id,
+                wake_mode=self.config.openclaw_hooks.wake_mode,
+                deliver=False,
+                timeout_seconds=self.config.executor.timeout_seconds,
+            )
+            self._safe_transition(run.run_id, to_status="coding", expected_from=("awaiting_review", "awaiting_ci", "planning"))
+            self.store.append_audit(
+                run.run_id,
+                "pr_feedback_dispatch",
+                payload={"pr_id": normalized.pr_id, "event_type": normalized.event_type},
+            )
+            return BridgeResult(
+                accepted=True,
+                action="pr_feedback_dispatched",
+                run_id=run.run_id,
+                session_key=run.session_id,
+            )
+
         self.store.append_audit(
             run.run_id,
-            "pr_feedback_dispatch",
-            payload={"pr_id": normalized.pr_id, "event_type": normalized.event_type},
+            "pr_feedback_queued",
+            payload={
+                "pr_id": normalized.pr_id,
+                "event_type": normalized.event_type,
+                "comment_count": len(comments),
+            },
         )
-        return BridgeResult(accepted=True, action="pr_feedback_dispatched", run_id=run.run_id, session_key=run.session_id)
+        threading.Thread(
+            target=self._run_pr_feedback_resume,
+            args=(run.run_id, comments, normalized.to_dict()),
+            daemon=True,
+        ).start()
+        return BridgeResult(accepted=True, action="pr_feedback_queued", run_id=run.run_id, session_key=run.session_id)
 
     def _handle_ci_event(self, normalized: NormalizedAdoEvent) -> BridgeResult:
         run = self.store.find_run_by_ci_run_id(normalized.ci_run_id or "")
@@ -179,30 +201,55 @@ class HarnessBridge:
             return BridgeResult(accepted=False, action="ci_resume_skipped", reason="run_not_found")
 
         build_summary = self.ado_client.get_build(normalized.ci_run_id or "")
-        prompt = self._build_ci_prompt(normalized, run.run_id, build_summary)
-        self.openclaw_client.run_agent(
-            message=prompt,
-            name="Azure DevOps CI Failure",
-            agent_id=self.config.openclaw_hooks.agent_id,
-            session_key=run.session_id,
-            wake_mode=self.config.openclaw_hooks.wake_mode,
-            deliver=False,
-            timeout_seconds=self.config.executor.timeout_seconds,
-        )
-        self._safe_transition(run.run_id, to_status="coding", expected_from=("awaiting_ci", "awaiting_review", "planning"))
+        if self.task_orchestrator is None:
+            prompt = self._build_ci_prompt(normalized, run.run_id, build_summary)
+            self.openclaw_client.run_agent(
+                message=prompt,
+                name="Azure DevOps CI Failure",
+                agent_id=self.config.openclaw_hooks.agent_id,
+                session_key=run.session_id,
+                wake_mode=self.config.openclaw_hooks.wake_mode,
+                deliver=False,
+                timeout_seconds=self.config.executor.timeout_seconds,
+            )
+            self._safe_transition(run.run_id, to_status="coding", expected_from=("awaiting_ci", "awaiting_review", "planning"))
+            self.store.append_audit(
+                run.run_id,
+                "ci_recovery_dispatch",
+                payload={"ci_run_id": normalized.ci_run_id, "event_type": normalized.event_type},
+            )
+            self._notify(
+                event_type="ci_failed",
+                task_key=run.task_key,
+                run_id=run.run_id,
+                summary=f"CI failure for {run.task_key} dispatched to OpenClaw",
+                details={"ci_run_id": normalized.ci_run_id},
+            )
+            return BridgeResult(
+                accepted=True,
+                action="ci_recovery_dispatched",
+                run_id=run.run_id,
+                session_key=run.session_id,
+            )
+
         self.store.append_audit(
             run.run_id,
-            "ci_recovery_dispatch",
+            "ci_recovery_queued",
             payload={"ci_run_id": normalized.ci_run_id, "event_type": normalized.event_type},
         )
+        threading.Thread(
+            target=self._run_ci_recovery,
+            args=(run.run_id, build_summary, normalized.to_dict()),
+            daemon=True,
+        ).start()
         self._notify(
             event_type="ci_failed",
             task_key=run.task_key,
             run_id=run.run_id,
-            summary=f"CI failure for {run.task_key} dispatched to OpenClaw",
+            summary=f"CI failure for {run.task_key} queued for recovery",
             details={"ci_run_id": normalized.ci_run_id},
         )
-        return BridgeResult(accepted=True, action="ci_recovery_dispatched", run_id=run.run_id, session_key=run.session_id)
+        return BridgeResult(accepted=True, action="ci_recovery_queued", run_id=run.run_id, session_key=run.session_id)
 
     def _load_task_context(self, task_id: str | None) -> dict[str, Any]:
         if not task_id:
@@ -217,7 +264,6 @@ class HarnessBridge:
                     "System.TeamProject",
                     "System.AssignedTo",
                 ],
-                expand="relations",
             )
         except Exception as exc:
             return {"task_fetch_error": str(exc), "task_id": task_id}
@@ -336,5 +382,47 @@ class HarnessBridge:
             self.store.append_audit(
                 run_id,
                 "task_run_failed",
+                payload={"error": str(exc), "error_type": type(exc).__name__},
+            )
+
+    def _run_pr_feedback_resume(
+        self,
+        run_id: str,
+        comments: list[dict[str, Any]],
+        event_payload: Mapping[str, Any],
+    ) -> None:
+        if self.task_orchestrator is None:
+            return
+        try:
+            self.task_orchestrator.resume_from_pr_feedback(
+                run_id,
+                comments=list(comments),
+                event_payload=dict(event_payload),
+            )
+        except Exception as exc:
+            self.store.append_audit(
+                run_id,
+                "pr_feedback_resume_failed",
+                payload={"error": str(exc), "error_type": type(exc).__name__},
+            )
+
+    def _run_ci_recovery(
+        self,
+        run_id: str,
+        build_summary: Mapping[str, Any],
+        event_payload: Mapping[str, Any],
+    ) -> None:
+        if self.task_orchestrator is None:
+            return
+        try:
+            self.task_orchestrator.resume_from_ci_failure(
+                run_id,
+                build_summary=dict(build_summary),
+                event_payload=dict(event_payload),
+            )
+        except Exception as exc:
+            self.store.append_audit(
+                run_id,
+                "ci_recovery_failed",
                 payload={"error": str(exc), "error_type": type(exc).__name__},
             )

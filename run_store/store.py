@@ -29,7 +29,7 @@ _ALLOWED_STATUS_TRANSITIONS = {
     "queued": {"claimed", "cancelled", "failed"},
     "claimed": {"planning", "cancelled", "failed"},
     "planning": {"coding", "awaiting_human", "cancelled", "failed"},
-    "coding": {"opening_pr", "awaiting_human", "cancelled", "failed"},
+    "coding": {"opening_pr", "awaiting_ci", "awaiting_review", "awaiting_human", "cancelled", "failed"},
     "opening_pr": {"awaiting_ci", "awaiting_review", "awaiting_human", "cancelled", "failed"},
     "awaiting_ci": {"coding", "completed", "awaiting_human", "cancelled", "failed"},
     "awaiting_review": {"coding", "completed", "awaiting_human", "cancelled", "failed"},
@@ -458,6 +458,7 @@ class RunStore:
         run_id: str,
         *,
         repo_id: str | None = None,
+        session_id: str | None = None,
         branch_name: str | None = None,
         workspace_path: str | None = None,
         pr_id: str | None = None,
@@ -467,6 +468,7 @@ class RunStore:
     ) -> TaskRun:
         updates = {
             "repo_id": repo_id,
+            "session_id": session_id,
             "branch_name": branch_name,
             "workspace_path": workspace_path,
             "pr_id": pr_id,

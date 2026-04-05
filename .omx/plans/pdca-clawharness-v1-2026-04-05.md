@@ -1,7 +1,7 @@
 # ClawHarness v1 PDCA Execution Loop
 
 Date: 2026-04-05
-Status: Core V1 closure validated; extended live follow-up cycles still open
+Status: Core V1 closure validated through live PR feedback; CI and deployment follow-up cycles still open
 Companion to:
 - `.omx/plans/prd-clawharness-v1-2026-04-05.md`
 - `.omx/plans/test-spec-clawharness-v1-2026-04-05.md`
@@ -284,7 +284,7 @@ The repository-scoped implementation work is complete for the current session:
 - Cycle 3:
   - `codex_acp_runner` has an executable ACP payload builder, task prompt formatter, and resume-session contract
 - Cycle 4:
-  - PR and CI resume dispatch are implemented in `harness_runtime/bridge.py`
+  - PR feedback and CI recovery orchestration are implemented in `harness_runtime/bridge.py` and `harness_runtime/orchestrator.py`
 - Cycle 5:
   - `rocketchat_notifier` exists
   - Docker, systemd, Windows service, and healthcheck assets exist
@@ -295,18 +295,18 @@ The repository-scoped implementation work is complete for the current session:
 Verification evidence currently includes:
 
 - Python compile checks for all implemented modules
-- `python -m unittest discover -s tests -v` passing with 51 tests
+- `python -m unittest discover -s tests -v` passing with 54 tests
 - JSON syntax validation for `deploy/config/openclaw.json`, `openclaw-plugin/package.json`, and `openclaw-plugin/openclaw.plugin.json`
 - `python -m harness_runtime.main --help` CLI smoke check
 - live OpenClaw ACP smoke execution with structured executor result output
 - live Azure DevOps work item `29` reaching branch + PR creation, which exposed the result-artifact isolation bug
 - corrective fix for task context loading and executor artifact isolation
 - live Azure DevOps work item `30` reaching branch + clean PR creation with only `README.md` changed
+- live Azure DevOps work item `31` reaching PR `19` and then completing a real PR-feedback follow-up on the same `run_id`
 - run-store audit persisted in `C:\Users\lus\.openclaw\harness\harness.db`
 
 Remaining work is environment-bound rather than repository-bound:
 
-- real PR feedback resume verification
 - real CI failure recovery verification
 - live Docker and Linux native service startup verification
 - protected-branch / reviewer / CI policy verification
@@ -346,12 +346,57 @@ Acceptance results:
 Evidence:
 - cycle 1 live run: work item `29`, PR `17`, issue discovered and captured
 - cycle 2 live run: work item `30`, active PR `18`, clean single-file diff
-- full automated test suite: `51/51` passing
+- full automated test suite: `54/54` passing
 
 Residual risks:
-- AC-06 and AC-07 are still only locally validated
+- AC-06 and AC-07 were still only locally validated at the end of cycle 3
 - Docker and Linux deployment profiles still need live verification
 
 Act decision:
 - close the V1 core happy-path loop
 - keep later corrective cycles focused on resume paths, governed repos, and deployment validation
+
+## Cycle 4 Corrective Status
+
+Objective:
+- close the live PR feedback loop and harden ACP resume compatibility against the installed gateway behavior
+
+Planned scope:
+- `harness_runtime/orchestrator.py`
+- `harness_runtime/bridge.py`
+- `run_store/store.py`
+- `tests/test_harness_runtime.py`
+- `tests/test_task_orchestrator.py`
+- `tests/test_run_store.py`
+- `.omx/plans/evidence-clawharness-v1-2026-04-05.md`
+- `.omx/plans/pdca-clawharness-v1-2026-04-05.md`
+
+Changed files:
+- `harness_runtime/orchestrator.py`
+- `harness_runtime/bridge.py`
+- `run_store/store.py`
+- `tests/test_harness_runtime.py`
+- `tests/test_task_orchestrator.py`
+- `tests/test_run_store.py`
+- `.omx/plans/evidence-clawharness-v1-2026-04-05.md`
+- `.omx/plans/pdca-clawharness-v1-2026-04-05.md`
+
+Acceptance results:
+- AC-06: passed live
+- AC-07: passed locally, live blocked by missing CI builds in the validation project
+
+Evidence:
+- live task `31` opened PR `19` with run `manual-ai-review-test-31`
+- PR thread `79` was created with a real review comment and later received a ClawHarness reply on the same thread
+- live run audit returned `manual-ai-review-test-31` to `awaiting_review` after `pr_feedback_replied`
+- full automated test suite: `54/54` passing
+- `python -m compileall ado_client codex_acp_runner harness_runtime rocketchat_notifier run_store tests`: passed
+
+Residual risks:
+- the current Azure DevOps validation project had no build definitions or build runs on 2026-04-05, so AC-07 could not be exercised live
+- Docker and Linux deployment profiles still need live verification
+- protected-branch / reviewer / CI-policy interactions still need a governed target repository
+
+Act decision:
+- treat the V1 collaboration loop as closed through PR feedback
+- keep the next corrective cycle focused on CI recovery in the first project that has a real build definition

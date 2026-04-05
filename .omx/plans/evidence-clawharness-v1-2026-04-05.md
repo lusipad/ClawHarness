@@ -1,7 +1,7 @@
 # ClawHarness v1 Evidence Snapshot
 
 Date: 2026-04-05
-Status: Live V1 closed-loop validated on Azure DevOps + OpenClaw ACP + local Rocket.Chat
+Status: Live V1 task-to-PR + PR-feedback loop validated on Azure DevOps + OpenClaw ACP + local Rocket.Chat
 Companion to:
 - `.omx/plans/test-spec-clawharness-v1-2026-04-05.md`
 - `.omx/plans/pdca-clawharness-v1-2026-04-05.md`
@@ -23,14 +23,16 @@ Additional environment verification:
 
 ## Result Summary
 
-- Local automated tests: passed, `51/51`
+- Local automated tests: passed, `54/54`
 - Python module compile checks: passed
 - OpenClaw ACP real smoke: passed
 - Real Azure DevOps task `29` reached `awaiting_review` and opened PR `17`
 - PDCA found one live issue in cycle 1: executor result artifact was written inside the cloned repo and got committed
 - Harness was corrected so executor artifacts are written to `~/.openclaw/workspace/harness/.executor-artifacts/<run_id>/`
 - Real Azure DevOps task `30` reached `awaiting_review` and opened clean PR `18`
+- Real Azure DevOps task `31` reached `awaiting_review`, opened PR `19`, and later completed a live PR-feedback follow-up on the same run
 - PR `18` contains only `README.md`
+- PR `19` thread `79` now contains both the human review comment and the ClawHarness follow-up reply
 - Superseded PR `17` was abandoned after the cycle 2 fix was validated
 - Run audit evidence was persisted in `C:\Users\lus\.openclaw\harness\harness.db`
 
@@ -102,6 +104,37 @@ Content evidence:
 This repository was updated by the ClawHarness end-to-end validation rerun on 2026-04-05.
 ```
 
+### Cycle 3: Live PR feedback resume after ACP-compatibility corrections
+
+Work item:
+- id: `31`
+- html: `https://dev.azure.com/lusipad/ba6a3017-b334-48c5-ac75-2696bac2cf94/_workitems/edit/31`
+
+Run:
+- run id: `manual-ai-review-test-31`
+- final status: `awaiting_review`
+- session id preserved in run record: `agent:codex:acp:ebe3c03a-2979-49c4-b6a7-2b2c99f8b699`
+- PR id: `19`
+
+Live feedback evidence:
+- a real review thread `79` was created on PR `19`
+- the incoming comment requested one more README sentence under `Build and Test`
+- ClawHarness resolved `pr_id -> run_id`, reused run `manual-ai-review-test-31`, processed the unresolved thread, and replied on the same PR thread
+- run audit shows `pr_feedback_queued -> pr_feedback_loaded -> pr_feedback_executor_completed -> checks_completed -> pr_feedback_replied -> awaiting_review`
+
+Repository evidence:
+- branch: `refs/heads/ai/31-live-ac-06-validation-readme-follow-up-v`
+- synced commit: `fe1d7135bbca37f88176056148411191b37e7e15`
+- workspace README now contains:
+
+```md
+Recheck any README updates after review feedback to confirm the documented build and test steps still match the latest branch state.
+```
+
+Compatibility note:
+- live validation exposed that completed ACP runs could not be resumed by resource id in this gateway configuration
+- the harness was corrected to preserve the logical `session_id` in the run record while starting a fresh ACP execution for resume work in the same run/workspace/branch context
+
 ## Acceptance Mapping
 
 ### AC-01: Single Task Claim and Dedupe
@@ -161,20 +194,29 @@ Evidence:
 ### AC-06: PR Feedback Resume
 
 Status:
-- passed locally, live validation pending
+- passed live
 
 Evidence:
-- `tests/test_harness_runtime.py::test_pr_event_resumes_existing_run`
+- `tests/test_harness_runtime.py::test_pr_event_queues_existing_run_into_runtime_orchestrator`
+- `tests/test_task_orchestrator.py::test_resume_from_pr_feedback_reuses_session_and_replies_without_new_run`
 - `tests/test_run_store.py::test_update_run_fields_and_lookup_by_pr_and_ci`
+- live run `manual-ai-review-test-31` resumed from PR `19`
+- PR thread `79` contains the human review comment and the ClawHarness reply comment `2`
+- live run audit for `manual-ai-review-test-31` preserved the same `run_id` and `session_id` while returning the run to `awaiting_review`
 
 ### AC-07: CI Failure Recovery
 
 Status:
-- passed locally, live validation pending
+- passed locally, live validation blocked by missing CI builds in the target Azure DevOps project
 
 Evidence:
-- `tests/test_harness_runtime.py::test_ci_event_resumes_existing_run_and_notifies`
+- `tests/test_harness_runtime.py::test_ci_event_queues_existing_run_into_runtime_orchestrator_and_notifies`
+- `tests/test_task_orchestrator.py::test_resume_from_ci_failure_retries_build_and_updates_run`
+- `tests/test_task_orchestrator.py::test_resume_from_ci_failure_escalates_when_executor_requires_human`
 - `tests/test_ado_client.py::test_retry_build_queues_new_build_from_existing_metadata`
+
+Blocking fact:
+- on 2026-04-05, `AzureDevOpsRestClient.list_builds(top=10)` returned `[]` for `AI-Review-Test`, so there was no live build definition/run available to trigger a real `ci.run.failed` recovery cycle
 
 ### AC-08: Rocket.Chat Lifecycle Notifications
 
@@ -268,7 +310,7 @@ Remaining gap:
 
 ## Residual Risks
 
-- Live PR feedback resume and CI failure recovery have not yet been exercised against the real Azure DevOps project.
+- Live CI failure recovery is still blocked by the absence of CI builds/definitions in the current Azure DevOps validation project.
 - Docker and Linux native service assets are present, but startup validation still requires the target runtime.
 - Protected-branch, reviewer, and CI-policy interactions may still require small adapter changes in the first fully governed repository.
-- ClawHarness V1 closure is now proven for the task -> ACP -> checks -> branch -> PR path, but not yet for the PR feedback -> fix -> CI retry continuation path.
+- ClawHarness V1 closure is now proven for the task -> ACP -> checks -> branch -> PR -> feedback -> fix path, but not yet for the CI-failure -> patch/retry continuation path.
