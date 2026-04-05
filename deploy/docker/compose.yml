@@ -1,0 +1,38 @@
+services:
+  openclaw-gateway:
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
+    container_name: openclaw-gateway
+    restart: unless-stopped
+    ports:
+      - "18789:18789"
+    environment:
+      OPENCLAW_CONFIG_PATH: /var/lib/openclaw/openclaw.json
+    volumes:
+      - ${OPENCLAW_DATA_DIR:-./.data/openclaw}:/var/lib/openclaw
+      - ${OPENCLAW_WORKSPACE_DIR:-./.data/workspace}:/var/lib/openclaw/workspace
+      - ../../openclaw-plugin:/var/lib/openclaw/plugins/clawharness:ro
+
+  harness-bridge:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/harness-bridge.Dockerfile
+    container_name: clawharness-bridge
+    restart: unless-stopped
+    depends_on:
+      - openclaw-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      ADO_PAT: ${ADO_PAT}
+      ADO_WEBHOOK_SECRET: ${ADO_WEBHOOK_SECRET}
+      RC_WEBHOOK_URL: ${RC_WEBHOOK_URL}
+      OPENCLAW_HOOKS_TOKEN: ${OPENCLAW_HOOKS_TOKEN}
+      HARNESS_INGRESS_TOKEN: ${HARNESS_INGRESS_TOKEN}
+    volumes:
+      - ${HARNESS_DATA_DIR:-./.data/harness}:/root/.openclaw/harness
+      - ../config:/app/deploy/config:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

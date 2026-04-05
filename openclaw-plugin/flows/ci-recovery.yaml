@@ -1,0 +1,56 @@
+# Draft flow outline for CI recovery.
+# Validate against the installed OpenClaw TaskFlow schema before runtime use.
+
+id: ci-recovery
+status: draft
+purpose: Resume an existing run after CI failure and either patch or escalate.
+
+capabilities:
+  runtime:
+    - resolve_run_from_ci
+    - transition_status
+  shared:
+    - ci.get_status
+    - ci.retry
+    - executor.run_coding_task
+    - vcs.commit_and_push
+    - chat.post_update
+
+skills:
+  - recover-ci-failure
+
+steps:
+  - id: resolve-run
+    kind: runtime
+    uses: resolve_run_from_ci
+    outcome: existing run and session identified from ci_run_id
+
+  - id: load-failure
+    kind: capability
+    uses: ci.get_status
+    outcome: CI failure summary available to the flow
+
+  - id: decide
+    kind: skill
+    uses: recover-ci-failure
+    outcome: patch-or-escalate decision made
+
+  - id: patch
+    kind: capability
+    uses: executor.run_coding_task
+    outcome: patch applied when recovery is possible
+
+  - id: publish
+    kind: capability
+    uses: vcs.commit_and_push
+    outcome: fix pushed when recovery succeeds
+
+  - id: retry
+    kind: capability
+    uses: ci.retry
+    outcome: CI rerun requested when policy allows it
+
+  - id: notify
+    kind: capability
+    uses: chat.post_update
+    outcome: patch or escalation status sent

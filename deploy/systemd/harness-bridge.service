@@ -1,0 +1,15 @@
+[Unit]
+Description=ClawHarness Bridge
+After=network.target openclaw.service
+Requires=openclaw.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/clawharness
+EnvironmentFile=-/etc/clawharness/harness.env
+ExecStart=/usr/bin/python3 -m harness_runtime.main --bind 127.0.0.1 --port 8080
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,46 @@
+# Draft MVP provider baseline.
+# This file captures the agreed P0 profile:
+# - Azure DevOps via ado-rest
+# - Rocket.Chat via webhook notifications
+# - Codex via ACP
+# Validate exact runtime parsing rules against the installed OpenClaw version before production use.
+
+providers:
+  task_pr_ci:
+    family: azure-devops
+    mode: ado-rest
+    fallback_mode: ado-rest
+    base_url: ${ADO_BASE_URL}
+    project: ${ADO_PROJECT}
+    organization: null
+    auth:
+      type: pat
+      secret_env: ADO_PAT
+    events:
+      mode: webhook
+      webhook_secret_env: ADO_WEBHOOK_SECRET
+
+  chat:
+    family: rocketchat
+    mode: rocketchat-webhook
+    room: ai-dev
+    webhook_url_env: RC_WEBHOOK_URL
+
+  executor:
+    family: acp
+    mode: codex-acp
+    harness: codex
+    backend: acpx
+    runtime:
+      mode: persistent
+      timeout_seconds: 3600
+
+runtime:
+  storage:
+    kind: sqlite
+    path: ~/.openclaw/harness/harness.db
+  workspace_root: ~/.openclaw/workspace/harness
+  branch_prefix: ai
+  lock_ttl_seconds: 1800
+  dedupe_ttl_seconds: 86400
+  audit_retention_days: 30

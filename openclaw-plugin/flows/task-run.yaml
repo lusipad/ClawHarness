@@ -1,0 +1,76 @@
+# Draft flow outline for the ClawHarness MVP.
+# This file is intentionally schema-light until the installed OpenClaw TaskFlow schema is verified.
+# The capability names are stable; the exact wrapper keys may change during implementation.
+
+id: task-run
+status: draft
+purpose: Take an eligible task from intake to PR creation and first CI wait.
+
+capabilities:
+  runtime:
+    - claim_run
+    - transition_status
+    - save_audit
+  shared:
+    - task.get
+    - task.update_status
+    - repo.prepare_workspace
+    - executor.run_coding_task
+    - vcs.commit_and_push
+    - pr.create
+    - chat.post_update
+
+skills:
+  - analyze-task
+  - implement-task
+
+steps:
+  - id: validate-and-claim
+    kind: runtime
+    uses: claim_run
+    outcome: active run exists and task lock is held
+
+  - id: load-task
+    kind: capability
+    uses: task.get
+    outcome: normalized task payload available to the flow
+
+  - id: planning
+    kind: skill
+    uses: analyze-task
+    outcome: structured task plan with risks and impacted modules
+
+  - id: prepare-workspace
+    kind: capability
+    uses: repo.prepare_workspace
+    outcome: clean per-run workspace path
+
+  - id: coding
+    kind: capability
+    uses: executor.run_coding_task
+    outcome: code changes, changed files, and check summary
+
+  - id: verification-gate
+    kind: control
+    uses: check-gate
+    outcome: branch push is blocked unless required checks have run
+
+  - id: publish-branch
+    kind: capability
+    uses: vcs.commit_and_push
+    outcome: branch pushed to the remote repository
+
+  - id: open-pr
+    kind: capability
+    uses: pr.create
+    outcome: PR id and url recorded in the run
+
+  - id: notify
+    kind: capability
+    uses: chat.post_update
+    outcome: lifecycle update sent to Rocket.Chat
+
+  - id: finalize
+    kind: runtime
+    uses: transition_status
+    outcome: run moves to awaiting_ci or awaiting_review

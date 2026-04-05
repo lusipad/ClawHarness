@@ -1,0 +1,29 @@
+{
+  "id": "clawharness",
+  "kind": "context-engine",
+  "skills": [
+    "./skills"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "bridgeBaseUrl": {
+        "type": "string"
+      },
+      "bridgeToken": {
+        "type": "string"
+      }
+    }
+  },
+  "uiHints": {
+    "bridgeBaseUrl": {
+      "label": "Bridge Base URL",
+      "placeholder": "http://127.0.0.1:8080"
+    },
+    "bridgeToken": {
+      "label": "Bridge Token",
+      "sensitive": true
+    }
+  }
+}

@@ -1,0 +1,19 @@
+policy:
+  vcs:
+    allow_protected_branch_push: false
+    allow_pr_creation: true
+    allow_merge: false
+  workspace:
+    one_workspace_per_run: true
+    cleanup_required: true
+  runtime:
+    sqlite_only_v1: true
+    single_gateway_only_v1: true
+  chat:
+    mode: notify-only
+  provider:
+    task_pr_ci_mode: ado-rest
+    task_pr_ci_fallback_mode: ado-rest
+  executor:
+    mode: codex-acp
+    require_checks_before_push: true

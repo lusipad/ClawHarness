@@ -1,0 +1,14 @@
+[Unit]
+Description=OpenClaw Gateway
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/openclaw
+EnvironmentFile=-/etc/openclaw/openclaw.env
+ExecStart=/usr/bin/openclaw gateway
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
