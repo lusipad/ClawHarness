@@ -24,10 +24,19 @@ class AzureDevOpsRuntimeConfig:
 
 
 @dataclass(frozen=True)
+class GitHubRuntimeConfig:
+    base_url: str
+    mode: str
+    token: str | None
+    webhook_secret: str | None
+
+
+@dataclass(frozen=True)
 class RocketChatRuntimeConfig:
     mode: str
     webhook_url: str | None
     channel: str | None
+    command_token: str | None = None
 
 
 @dataclass(frozen=True)
@@ -45,7 +54,9 @@ class RuntimeStorageConfig:
     branch_prefix: str
     lock_ttl_seconds: int
     dedupe_ttl_seconds: int
-    audit_retention_days: int
+    audit_retention_days: int = 30
+    terminal_run_retention_days: int = 30
+    cleanup_batch_size: int = 50
 
 
 @dataclass(frozen=True)
@@ -60,7 +71,7 @@ class OpenClawHooksConfig:
 
 @dataclass(frozen=True)
 class HarnessRuntimeConfig:
-    azure_devops: AzureDevOpsRuntimeConfig
+    azure_devops: AzureDevOpsRuntimeConfig | None
     rocketchat: RocketChatRuntimeConfig
     executor: ExecutorRuntimeConfig
     runtime: RuntimeStorageConfig
@@ -68,6 +79,9 @@ class HarnessRuntimeConfig:
     openclaw_gateway_token: str | None
     ingress_token: str | None
     owner: str
+    github: GitHubRuntimeConfig | None = None
+    default_task_provider: str = "azure-devops"
+    readonly_token: str | None = None
 
 
 def load_harness_runtime_config(
@@ -91,18 +105,24 @@ def load_harness_runtime_config(
     storage = _require_mapping(runtime_root, "storage")
     hooks = _require_mapping(openclaw, "hooks")
 
+    azure_devops_root = _resolve_provider_mapping(task_pr_ci, family="azure-devops", nested_key="azure_devops")
+    github_root = _resolve_provider_mapping(task_pr_ci, family="github", nested_key="github")
+    default_task_provider = _optional_string(task_pr_ci, "default_provider") or _optional_string(task_pr_ci, "family")
+    if not default_task_provider:
+        if azure_devops_root is not None:
+            default_task_provider = "azure-devops"
+        elif github_root is not None:
+            default_task_provider = "github"
+        else:
+            default_task_provider = "azure-devops"
+
     return HarnessRuntimeConfig(
-        azure_devops=AzureDevOpsRuntimeConfig(
-            base_url=_require_resolved_string(task_pr_ci, "base_url", env_map),
-            project=_require_resolved_string(task_pr_ci, "project", env_map),
-            mode=_require_resolved_string(task_pr_ci, "mode", env_map),
-            pat=_resolve_secret(_require_mapping(task_pr_ci, "auth"), env_map, "secret_env"),
-            webhook_secret=_resolve_nested_secret(task_pr_ci, env_map, "events", "webhook_secret_env"),
-        ),
+        azure_devops=_load_azure_devops_runtime_config(azure_devops_root, env_map),
         rocketchat=RocketChatRuntimeConfig(
             mode=_require_resolved_string(chat, "mode", env_map),
             webhook_url=_resolve_secret(chat, env_map, "webhook_url_env"),
             channel=_optional_string(chat, "room"),
+            command_token=_resolve_secret(chat, env_map, "command_token_env"),
         ),
         executor=ExecutorRuntimeConfig(
             mode=_require_resolved_string(executor, "mode", env_map),
@@ -117,6 +137,8 @@ def load_harness_runtime_config(
             lock_ttl_seconds=int(runtime_root.get("lock_ttl_seconds", 1800)),
             dedupe_ttl_seconds=int(runtime_root.get("dedupe_ttl_seconds", 86400)),
             audit_retention_days=int(runtime_root.get("audit_retention_days", 30)),
+            terminal_run_retention_days=int(runtime_root.get("terminal_run_retention_days", 30)),
+            cleanup_batch_size=int(runtime_root.get("cleanup_batch_size", 50)),
         ),
         openclaw_hooks=OpenClawHooksConfig(
             base_url=_require_resolved_string(openclaw, "gatewayBaseUrl", env_map),
@@ -128,6 +150,9 @@ def load_harness_runtime_config(
         ),
         openclaw_gateway_token=_resolve_placeholder(_optional_string(openclaw, "gatewayToken"), env_map),
         ingress_token=_resolve_placeholder(_optional_string(hooks, "ingressToken"), env_map),
+        github=_load_github_runtime_config(github_root, env_map),
+        default_task_provider=default_task_provider,
+        readonly_token=env_map.get("HARNESS_READONLY_TOKEN"),
         owner=_require_resolved_string(hooks, "owner", env_map),
     )
 
@@ -157,6 +182,54 @@ def _require_mapping(mapping: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ConfigError(f"Missing mapping: {key}")
     return value
+
+
+def _resolve_provider_mapping(
+    mapping: Mapping[str, Any],
+    *,
+    family: str,
+    nested_key: str,
+) -> Mapping[str, Any] | None:
+    nested = mapping.get(nested_key)
+    if isinstance(nested, Mapping):
+        return nested
+    candidate_family = mapping.get("family")
+    if candidate_family == family:
+        return mapping
+    return None
+
+
+def _load_azure_devops_runtime_config(
+    mapping: Mapping[str, Any] | None,
+    env_map: Mapping[str, str],
+) -> AzureDevOpsRuntimeConfig | None:
+    if mapping is None:
+        return None
+    return AzureDevOpsRuntimeConfig(
+        base_url=_require_resolved_string(mapping, "base_url", env_map),
+        project=_require_resolved_string(mapping, "project", env_map),
+        mode=_require_resolved_string(mapping, "mode", env_map),
+        pat=_resolve_secret(_require_mapping(mapping, "auth"), env_map, "secret_env"),
+        webhook_secret=_resolve_nested_secret(mapping, env_map, "events", "webhook_secret_env"),
+    )
+
+
+def _load_github_runtime_config(
+    mapping: Mapping[str, Any] | None,
+    env_map: Mapping[str, str],
+) -> GitHubRuntimeConfig | None:
+    if mapping is None:
+        return None
+    return GitHubRuntimeConfig(
+        base_url=_resolve_required_string(
+            _optional_string(mapping, "base_url") or "https://api.github.com",
+            "github.base_url",
+            env_map,
+        ),
+        mode=_require_resolved_string(mapping, "mode", env_map),
+        token=_resolve_secret(_require_mapping(mapping, "auth"), env_map, "secret_env"),
+        webhook_secret=_resolve_nested_secret(mapping, env_map, "events", "webhook_secret_env"),
+    )
 
 
 def _require_string(mapping: Mapping[str, Any], key: str) -> str:

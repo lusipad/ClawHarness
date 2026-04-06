@@ -173,6 +173,35 @@ class AzureDevOpsRestClientTests(unittest.TestCase):
             queued_body,
         )
 
+    def test_retry_ci_run_requeues_latest_branch_tip_without_source_version(self) -> None:
+        self.transport.queue_json(
+            {
+                "id": 100,
+                "definition": {"id": 55},
+                "sourceBranch": "refs/heads/ai/task-1",
+                "sourceVersion": "abc123",
+                "parameters": "{\"runMode\":\"retry\"}",
+                "queue": {"id": 38},
+            }
+        )
+        self.transport.queue_json({"id": 101})
+
+        retried = self.client.retry_ci_run(100)
+
+        self.assertEqual({"id": 101}, retried)
+        self.assertEqual("GET", self.transport.calls[0]["method"])
+        self.assertEqual("POST", self.transport.calls[1]["method"])
+        queued_body = json.loads(self.transport.calls[1]["body"].decode("utf-8"))
+        self.assertEqual(
+            {
+                "definition": {"id": 55},
+                "sourceBranch": "refs/heads/ai/task-1",
+                "parameters": "{\"runMode\":\"retry\"}",
+                "queue": {"id": 38},
+            },
+            queued_body,
+        )
+
     def test_get_repository_reads_repository_metadata(self) -> None:
         self.transport.queue_json(
             {

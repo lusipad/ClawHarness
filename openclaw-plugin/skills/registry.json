@@ -1,0 +1,61 @@
+{
+  "version": "2026-04-06",
+  "skills": [
+    {
+      "id": "analyze-task",
+      "version": "1.0.0",
+      "source": "openclaw-plugin/skills/analyze-task",
+      "description": "Analyze task scope, impacted modules, validation strategy, and risks before execution.",
+      "instructions": [
+        "Break the task into concrete implementation and validation steps.",
+        "Highlight ambiguity, dependency, rollout, and rollback risks early.",
+        "Do not modify files during the planning-only phase."
+      ],
+      "run_kinds": ["task"],
+      "agent_roles": ["planner"],
+      "provider_types": ["*"]
+    },
+    {
+      "id": "implement-task",
+      "version": "1.0.0",
+      "source": "openclaw-plugin/skills/implement-task",
+      "description": "Implement the planned task while preserving repository conventions and verification discipline.",
+      "instructions": [
+        "Apply the planned changes in the existing workspace with minimal, reviewable diffs.",
+        "Preserve repository conventions and update or add validation as needed.",
+        "Leave commit, push, and PR publication to the harness."
+      ],
+      "run_kinds": ["task"],
+      "agent_roles": ["executor", "reviewer", "verifier"],
+      "provider_types": ["*"]
+    },
+    {
+      "id": "fix-pr-feedback",
+      "version": "1.0.0",
+      "source": "openclaw-plugin/skills/fix-pr-feedback",
+      "description": "Process unresolved PR feedback on the existing branch without opening a new run chain.",
+      "instructions": [
+        "Address unresolved review comments on the current branch and workspace.",
+        "Prefer precise updates tied to each feedback thread.",
+        "Keep the PR reply and publication steps delegated to the harness."
+      ],
+      "run_kinds": ["pr-feedback"],
+      "agent_roles": ["executor"],
+      "provider_types": ["*"]
+    },
+    {
+      "id": "recover-ci-failure",
+      "version": "1.0.0",
+      "source": "openclaw-plugin/skills/recover-ci-failure",
+      "description": "Diagnose CI failures, decide whether automatic recovery is safe, and prepare patch-and-retry when appropriate.",
+      "instructions": [
+        "Use the failed CI summary to determine whether an automatic retry path is safe.",
+        "If recoverable, patch the existing branch and leave retry orchestration to the harness.",
+        "If not recoverable, return an explicit human-escalation conclusion with the blocking reason."
+      ],
+      "run_kinds": ["ci-recovery"],
+      "agent_roles": ["executor"],
+      "provider_types": ["*"]
+    }
+  ]
+}

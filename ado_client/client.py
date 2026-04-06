@@ -5,67 +5,34 @@ import json
 import os
 import re
 import subprocess
-from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
 from urllib import parse, request
 from urllib.error import HTTPError, URLError
 
+from workflow_provider import (
+    CommitPushResult,
+    NormalizedProviderEvent,
+    ProviderApiError,
+    RepositoryInfo,
+    WorkspacePreparationResult,
+)
+
 
 Transport = Callable[[str, str, dict[str, str], bytes | None], tuple[int, Mapping[str, str], bytes]]
 ShellRunner = Callable[[list[str], str | Path | None, Mapping[str, str] | None], subprocess.CompletedProcess[str]]
 
-
-@dataclass(frozen=True)
-class NormalizedAdoEvent:
-    event_type: str
-    provider: str
-    source_id: str | None
-    task_id: str | None
-    task_key: str | None
-    repo_id: str | None
-    pr_id: str | None
-    ci_run_id: str | None
-    chat_thread_id: str | None
-    actor: dict[str, Any]
-    payload: dict[str, Any]
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+NormalizedAdoEvent = NormalizedProviderEvent
 
 
-@dataclass(frozen=True)
-class RepositoryInfo:
-    repository_id: str
-    name: str
-    default_branch: str
-    remote_url: str
-    web_url: str | None = None
-
-
-@dataclass(frozen=True)
-class WorkspacePreparationResult:
-    repository: RepositoryInfo
-    workspace_path: str
-    base_branch: str
-
-
-@dataclass(frozen=True)
-class CommitPushResult:
-    branch_name: str
-    commit_sha: str
-    remote_ref: str
-    created_commit: bool
-
-
-class AzureDevOpsApiError(RuntimeError):
-    def __init__(self, message: str, *, status_code: int | None = None, response_body: str | None = None):
-        super().__init__(message)
-        self.status_code = status_code
-        self.response_body = response_body
+class AzureDevOpsApiError(ProviderApiError):
+    pass
 
 
 class AzureDevOpsRestClient:
+    provider_type = "azure-devops"
+    display_name = "Azure DevOps"
+
     def __init__(
         self,
         *,
@@ -89,10 +56,12 @@ class AzureDevOpsRestClient:
         self,
         work_item_id: int | str,
         *,
+        repo_id: str | None = None,
         fields: list[str] | None = None,
         expand: str | None = None,
         as_of: str | None = None,
     ) -> dict[str, Any]:
+        del repo_id
         query: dict[str, Any] = {}
         if fields:
             query["fields"] = ",".join(fields)
@@ -133,7 +102,14 @@ class AzureDevOpsRestClient:
             headers={"Content-Type": "application/json-patch+json"},
         )
 
-    def add_task_comment(self, work_item_id: int | str, text: str) -> dict[str, Any]:
+    def add_task_comment(
+        self,
+        work_item_id: int | str,
+        text: str,
+        *,
+        repo_id: str | None = None,
+    ) -> dict[str, Any]:
+        del repo_id
         return self._request_json(
             "POST",
             f"_apis/wit/workItems/{work_item_id}/comments",
@@ -329,6 +305,10 @@ class AzureDevOpsRestClient:
     def get_build(self, build_id: int | str) -> dict[str, Any]:
         return self._request_json("GET", f"_apis/build/builds/{build_id}")
 
+    def get_ci_run(self, ci_run_id: int | str, *, repo_id: str | None = None) -> dict[str, Any]:
+        del repo_id
+        return self.get_build(ci_run_id)
+
     def list_builds(
         self,
         *,
@@ -362,6 +342,7 @@ class AzureDevOpsRestClient:
         source_branch: str | None = None,
         source_version: str | None = None,
         parameters: dict[str, Any] | str | None = None,
+        queue_id: int | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "definition": {"id": definition_id},
@@ -372,6 +353,8 @@ class AzureDevOpsRestClient:
             body["sourceVersion"] = source_version
         if parameters is not None:
             body["parameters"] = parameters if isinstance(parameters, str) else json.dumps(parameters, sort_keys=True)
+        if queue_id is not None:
+            body["queue"] = {"id": queue_id}
         return self._request_json("POST", "_apis/build/builds", body=body)
 
     def retry_build(self, build_id: int | str) -> dict[str, Any]:
@@ -386,6 +369,26 @@ class AzureDevOpsRestClient:
             source_branch=existing.get("sourceBranch"),
             source_version=existing.get("sourceVersion"),
             parameters=existing.get("parameters"),
+        )
+
+    def retry_ci_run(self, ci_run_id: int | str, *, repo_id: str | None = None) -> dict[str, Any]:
+        del repo_id
+        existing = self.get_build(ci_run_id)
+        definition = existing.get("definition") or {}
+        definition_id = definition.get("id")
+        if definition_id is None:
+            raise AzureDevOpsApiError("Cannot retry CI run without definition id")
+        queue = existing.get("queue") or {}
+        queue_id = queue.get("id")
+
+        # CI recovery should validate the latest branch tip after the harness pushes a fix,
+        # so avoid pinning the rerun to the failed build's old sourceVersion while
+        # preserving the effective queue (for example a self-hosted pool override).
+        return self.queue_build(
+            definition_id=int(definition_id),
+            source_branch=existing.get("sourceBranch"),
+            parameters=existing.get("parameters"),
+            queue_id=int(queue_id) if queue_id is not None else None,
         )
 
     def normalize_event(
@@ -424,7 +427,7 @@ class AzureDevOpsRestClient:
 
         return NormalizedAdoEvent(
             event_type=event_type,
-            provider="azure-devops",
+            provider_type=self.provider_type,
             source_id=source_id or self._pick_value(payload, ["id", "eventId"]),
             task_id=str(task_id) if task_id is not None else None,
             task_key=task_key,

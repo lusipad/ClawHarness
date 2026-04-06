@@ -28,12 +28,12 @@ ACTIVE_STATUSES = tuple(status for status in VALID_STATUSES if status not in TER
 _ALLOWED_STATUS_TRANSITIONS = {
     "queued": {"claimed", "cancelled", "failed"},
     "claimed": {"planning", "cancelled", "failed"},
-    "planning": {"coding", "awaiting_human", "cancelled", "failed"},
-    "coding": {"opening_pr", "awaiting_ci", "awaiting_review", "awaiting_human", "cancelled", "failed"},
+    "planning": {"coding", "completed", "awaiting_human", "cancelled", "failed"},
+    "coding": {"opening_pr", "awaiting_ci", "awaiting_review", "awaiting_human", "completed", "cancelled", "failed"},
     "opening_pr": {"awaiting_ci", "awaiting_review", "awaiting_human", "cancelled", "failed"},
     "awaiting_ci": {"coding", "completed", "awaiting_human", "cancelled", "failed"},
     "awaiting_review": {"coding", "completed", "awaiting_human", "cancelled", "failed"},
-    "awaiting_human": {"planning", "coding", "cancelled", "failed"},
+    "awaiting_human": {"planning", "coding", "opening_pr", "awaiting_ci", "awaiting_review", "cancelled", "failed"},
     "completed": set(),
     "failed": set(),
     "cancelled": set(),
@@ -199,6 +199,57 @@ class RunStore:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (run_id,)).fetchone()
         return self._row_to_run(row)
+
+    def list_runs(
+        self,
+        *,
+        status: str | None = None,
+        task_key: str | None = None,
+        limit: int = 50,
+    ) -> list[TaskRun]:
+        effective_limit = max(1, min(limit, 500))
+        if status is not None and status not in VALID_STATUSES:
+            raise ValueError(f"Unknown status: {status}")
+        query = """
+            SELECT * FROM task_runs
+        """
+        filters: list[str] = []
+        params: list[Any] = []
+        if status is not None:
+            filters.append("status = ?")
+            params.append(status)
+        if task_key:
+            filters.append("task_key = ?")
+            params.append(task_key)
+        if filters:
+            query += f" WHERE {' AND '.join(filters)}"
+        query += " ORDER BY updated_at DESC, started_at DESC LIMIT ?"
+        params.append(effective_limit)
+        with self._connect() as connection:
+            rows = connection.execute(query, tuple(params)).fetchall()
+        return [run for row in rows if (run := self._row_to_run(row)) is not None]
+
+    def summarize_runs(self) -> dict[str, Any]:
+        with self._connect() as connection:
+            grouped = connection.execute(
+                """
+                SELECT status, COUNT(*) AS count
+                FROM task_runs
+                GROUP BY status
+                """
+            ).fetchall()
+        status_counts = {status: 0 for status in VALID_STATUSES}
+        for row in grouped:
+            status_counts[str(row["status"])] = int(row["count"])
+        total_runs = sum(status_counts.values())
+        active_runs = sum(status_counts[status] for status in ACTIVE_STATUSES)
+        terminal_runs = total_runs - active_runs
+        return {
+            "total_runs": total_runs,
+            "active_runs": active_runs,
+            "terminal_runs": terminal_runs,
+            "status_counts": status_counts,
+        }
 
     def find_active_run_by_task_key(self, task_key: str) -> TaskRun | None:
         placeholders = ", ".join("?" for _ in ACTIVE_STATUSES)
@@ -546,6 +597,374 @@ class RunStore:
             }
             for row in rows
         ]
+
+    def link_runs(
+        self,
+        parent_run_id: str,
+        child_run_id: str,
+        *,
+        relation_type: str = "child",
+        created_at: str | None = None,
+    ) -> None:
+        stamp = _normalize_timestamp(created_at)
+        with self._transaction() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO run_relationships (parent_run_id, child_run_id, relation_type, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (parent_run_id, child_run_id, relation_type, stamp),
+            )
+
+    def get_parent_run(self, child_run_id: str) -> TaskRun | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT parent.*
+                FROM run_relationships rel
+                JOIN task_runs parent ON parent.run_id = rel.parent_run_id
+                WHERE rel.child_run_id = ?
+                ORDER BY rel.created_at DESC
+                LIMIT 1
+                """,
+                (child_run_id,),
+            ).fetchone()
+        return self._row_to_run(row)
+
+    def get_parent_relationship(self, child_run_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT parent.*, rel.relation_type, rel.created_at AS relation_created_at
+                FROM run_relationships rel
+                JOIN task_runs parent ON parent.run_id = rel.parent_run_id
+                WHERE rel.child_run_id = ?
+                ORDER BY rel.created_at DESC
+                LIMIT 1
+                """,
+                (child_run_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "relation_type": row["relation_type"],
+            "created_at": row["relation_created_at"],
+            "run": self._row_to_run(row),
+        }
+
+    def list_child_runs(self, parent_run_id: str, *, relation_type: str | None = None) -> list[TaskRun]:
+        query = """
+            SELECT child.*
+            FROM run_relationships rel
+            JOIN task_runs child ON child.run_id = rel.child_run_id
+            WHERE rel.parent_run_id = ?
+        """
+        params: list[Any] = [parent_run_id]
+        if relation_type is not None:
+            query += " AND rel.relation_type = ?"
+            params.append(relation_type)
+        query += " ORDER BY rel.created_at DESC, child.updated_at DESC"
+        with self._connect() as connection:
+            rows = connection.execute(query, tuple(params)).fetchall()
+        return [run for row in rows if (run := self._row_to_run(row)) is not None]
+
+    def list_child_relationships(
+        self,
+        parent_run_id: str,
+        *,
+        relation_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        query = """
+            SELECT child.*, rel.relation_type, rel.created_at AS relation_created_at
+            FROM run_relationships rel
+            JOIN task_runs child ON child.run_id = rel.child_run_id
+            WHERE rel.parent_run_id = ?
+        """
+        params: list[Any] = [parent_run_id]
+        if relation_type is not None:
+            query += " AND rel.relation_type = ?"
+            params.append(relation_type)
+        query += " ORDER BY rel.created_at DESC, child.updated_at DESC"
+        with self._connect() as connection:
+            rows = connection.execute(query, tuple(params)).fetchall()
+
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            run = self._row_to_run(row)
+            if run is None:
+                continue
+            results.append(
+                {
+                    "relation_type": row["relation_type"],
+                    "created_at": row["relation_created_at"],
+                    "run": run,
+                }
+            )
+        return results
+
+    def record_checkpoint(
+        self,
+        run_id: str,
+        stage: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        created_at: str | None = None,
+    ) -> dict[str, Any]:
+        stamp = _normalize_timestamp(created_at)
+        with self._transaction() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO run_checkpoints (run_id, stage, payload_json, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (run_id, stage, _dump_payload(payload), stamp),
+            )
+        return {
+            "id": int(cursor.lastrowid),
+            "run_id": run_id,
+            "stage": stage,
+            "payload_json": _dump_payload(payload),
+            "created_at": stamp,
+        }
+
+    def list_checkpoints(self, run_id: str, *, stage: str | None = None) -> list[dict[str, Any]]:
+        query = """
+            SELECT id, run_id, stage, payload_json, created_at
+            FROM run_checkpoints
+            WHERE run_id = ?
+        """
+        params: list[Any] = [run_id]
+        if stage is not None:
+            query += " AND stage = ?"
+            params.append(stage)
+        query += " ORDER BY id"
+        with self._connect() as connection:
+            rows = connection.execute(query, tuple(params)).fetchall()
+        return [
+            {
+                "id": int(row["id"]),
+                "run_id": row["run_id"],
+                "stage": row["stage"],
+                "payload_json": row["payload_json"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def record_artifact(
+        self,
+        run_id: str,
+        artifact_type: str,
+        artifact_name: str,
+        *,
+        path: str | None = None,
+        external_url: str | None = None,
+        payload: dict[str, Any] | None = None,
+        created_at: str | None = None,
+    ) -> dict[str, Any]:
+        stamp = _normalize_timestamp(created_at)
+        with self._transaction() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO run_artifacts (run_id, artifact_type, artifact_name, path, external_url, payload_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, artifact_type, artifact_name, path, external_url, _dump_payload(payload), stamp),
+            )
+        return {
+            "id": int(cursor.lastrowid),
+            "run_id": run_id,
+            "artifact_type": artifact_type,
+            "artifact_name": artifact_name,
+            "path": path,
+            "external_url": external_url,
+            "payload_json": _dump_payload(payload),
+            "created_at": stamp,
+        }
+
+    def list_artifacts(self, run_id: str, *, artifact_type: str | None = None) -> list[dict[str, Any]]:
+        query = """
+            SELECT id, run_id, artifact_type, artifact_name, path, external_url, payload_json, created_at
+            FROM run_artifacts
+            WHERE run_id = ?
+        """
+        params: list[Any] = [run_id]
+        if artifact_type is not None:
+            query += " AND artifact_type = ?"
+            params.append(artifact_type)
+        query += " ORDER BY id"
+        with self._connect() as connection:
+            rows = connection.execute(query, tuple(params)).fetchall()
+        return [
+            {
+                "id": int(row["id"]),
+                "run_id": row["run_id"],
+                "artifact_type": row["artifact_type"],
+                "artifact_name": row["artifact_name"],
+                "path": row["path"],
+                "external_url": row["external_url"],
+                "payload_json": row["payload_json"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def link_thread(
+        self,
+        chat_thread_id: str,
+        *,
+        run_id: str,
+        session_id: str,
+        provider_type: str,
+        linked_at: str | None = None,
+    ) -> None:
+        stamp = _normalize_timestamp(linked_at)
+        with self._transaction() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO thread_links (chat_thread_id, run_id, session_id, provider_type, linked_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (chat_thread_id, run_id, session_id, provider_type, stamp),
+            )
+
+    def get_thread_link(self, chat_thread_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT chat_thread_id, run_id, session_id, provider_type, linked_at
+                FROM thread_links
+                WHERE chat_thread_id = ?
+                """,
+                (chat_thread_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "chat_thread_id": row["chat_thread_id"],
+            "run_id": row["run_id"],
+            "session_id": row["session_id"],
+            "provider_type": row["provider_type"],
+            "linked_at": row["linked_at"],
+        }
+
+    def record_skill_selection(
+        self,
+        run_id: str,
+        *,
+        run_kind: str,
+        agent_role: str,
+        selection_key: str,
+        payload: dict[str, Any],
+        parent_run_id: str | None = None,
+        registry_version: str | None = None,
+        created_at: str | None = None,
+    ) -> dict[str, Any]:
+        stamp = _normalize_timestamp(created_at)
+        with self._transaction() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO run_skill_selections (
+                  run_id, parent_run_id, run_kind, agent_role, registry_version, selection_key, payload_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    parent_run_id,
+                    run_kind,
+                    agent_role,
+                    registry_version,
+                    selection_key,
+                    _dump_payload(payload),
+                    stamp,
+                ),
+            )
+        return {
+            "id": int(cursor.lastrowid),
+            "run_id": run_id,
+            "parent_run_id": parent_run_id,
+            "run_kind": run_kind,
+            "agent_role": agent_role,
+            "registry_version": registry_version,
+            "selection_key": selection_key,
+            "payload_json": _dump_payload(payload),
+            "created_at": stamp,
+        }
+
+    def list_skill_selections(
+        self,
+        run_id: str,
+        *,
+        agent_role: str | None = None,
+    ) -> list[dict[str, Any]]:
+        query = """
+            SELECT id, run_id, parent_run_id, run_kind, agent_role, registry_version, selection_key, payload_json, created_at
+            FROM run_skill_selections
+            WHERE run_id = ?
+        """
+        params: list[Any] = [run_id]
+        if agent_role is not None:
+            query += " AND agent_role = ?"
+            params.append(agent_role)
+        query += " ORDER BY id"
+        with self._connect() as connection:
+            rows = connection.execute(query, tuple(params)).fetchall()
+        return [
+            {
+                "id": int(row["id"]),
+                "run_id": row["run_id"],
+                "parent_run_id": row["parent_run_id"],
+                "run_kind": row["run_kind"],
+                "agent_role": row["agent_role"],
+                "registry_version": row["registry_version"],
+                "selection_key": row["selection_key"],
+                "payload_json": row["payload_json"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def list_cleanup_candidates(
+        self,
+        *,
+        older_than: str,
+        limit: int = 50,
+    ) -> list[TaskRun]:
+        effective_limit = max(1, min(limit, 500))
+        placeholders = ", ".join("?" for _ in TERMINAL_STATUSES)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT *
+                FROM task_runs
+                WHERE status IN ({placeholders}) AND updated_at <= ?
+                ORDER BY updated_at ASC, started_at ASC
+                LIMIT ?
+                """,
+                (*TERMINAL_STATUSES, older_than, effective_limit),
+            ).fetchall()
+        return [run for row in rows if (run := self._row_to_run(row)) is not None]
+
+    def has_active_run_for_workspace(self, workspace_path: str, *, exclude_run_id: str | None = None) -> bool:
+        placeholders = ", ".join("?" for _ in ACTIVE_STATUSES)
+        query = f"""
+            SELECT 1
+            FROM task_runs
+            WHERE workspace_path = ? AND status IN ({placeholders})
+        """
+        params: list[Any] = [workspace_path, *ACTIVE_STATUSES]
+        if exclude_run_id is not None:
+            query += " AND run_id != ?"
+            params.append(exclude_run_id)
+        query += " LIMIT 1"
+        with self._connect() as connection:
+            row = connection.execute(query, tuple(params)).fetchone()
+        return row is not None
+
+    def cleanup_expired_state(self, *, now: str | None = None) -> None:
+        stamp = _normalize_timestamp(now)
+        with self._transaction() as connection:
+            self._delete_expired_state(connection, now=stamp)
 
     def _delete_expired_state(self, connection: sqlite3.Connection, *, now: str) -> None:
         connection.execute("DELETE FROM task_locks WHERE expires_at <= ?", (now,))

@@ -14,10 +14,13 @@ RUN apt-get update \
 COPY ado_client /app/ado_client
 COPY codex_acp_runner /app/codex_acp_runner
 COPY deploy/docker /app/deploy/docker
+COPY github_client /app/github_client
 COPY harness_runtime /app/harness_runtime
+COPY openclaw-plugin /app/openclaw-plugin
 COPY rocketchat_notifier /app/rocketchat_notifier
 COPY run_store /app/run_store
 COPY deploy/config /app/deploy/config
+COPY workflow_provider /app/workflow_provider
 
 RUN python -m compileall /app
 

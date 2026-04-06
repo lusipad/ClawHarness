@@ -1,6 +1,7 @@
 # Draft MVP provider baseline.
 # This file captures the agreed P0 profile:
 # - Azure DevOps via ado-rest
+# - GitHub via github-rest after you switch `task_pr_ci` to the GitHub profile below
 # - Rocket.Chat via webhook notifications
 # - Codex via ACP
 # Validate exact runtime parsing rules against the installed OpenClaw version before production use.
@@ -20,11 +21,23 @@ providers:
       mode: webhook
       webhook_secret_env: ADO_WEBHOOK_SECRET
 
+    # GitHub profile example:
+    # family: github
+    # mode: github-rest
+    # base_url: https://api.github.com
+    # auth:
+    #   type: token
+    #   secret_env: GITHUB_TOKEN
+    # events:
+    #   mode: webhook
+    #   webhook_secret_env: GITHUB_WEBHOOK_SECRET
+
   chat:
     family: rocketchat
     mode: rocketchat-webhook
     room: ai-dev
     webhook_url_env: RC_WEBHOOK_URL
+    command_token_env: RC_COMMAND_TOKEN
 
   executor:
     family: acp
@@ -44,3 +57,5 @@ runtime:
   lock_ttl_seconds: 1800
   dedupe_ttl_seconds: 86400
   audit_retention_days: 30
+  terminal_run_retention_days: 30
+  cleanup_batch_size: 50

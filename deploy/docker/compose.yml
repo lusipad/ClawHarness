@@ -63,10 +63,19 @@ services:
       ADO_PROJECT: ${ADO_PROJECT}
       ADO_PAT: ${ADO_PAT}
       ADO_WEBHOOK_SECRET: ${ADO_WEBHOOK_SECRET}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       RC_WEBHOOK_URL: ${RC_WEBHOOK_URL}
+      RC_COMMAND_TOKEN: ${RC_COMMAND_TOKEN:-}
       OPENCLAW_GATEWAY_BASE_URL: ${OPENCLAW_GATEWAY_BASE_URL:-http://openclaw-gateway:18789}
       HARNESS_INGRESS_TOKEN: ${HARNESS_INGRESS_TOKEN}
+      HARNESS_READONLY_TOKEN: ${HARNESS_READONLY_TOKEN:-}
       HARNESS_EXECUTOR_BACKEND: ${HARNESS_EXECUTOR_BACKEND:-codex-cli}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      CODEX_MODEL: ${CODEX_MODEL:-gpt-5.4}
+      CODEX_REVIEW_MODEL: ${CODEX_REVIEW_MODEL:-}
+      HARNESS_IMAGE_MODEL: ${HARNESS_IMAGE_MODEL:-}
     volumes:
       - ${HARNESS_DATA_DIR:-./.data/harness}:/home/node/.openclaw/harness
       - ${OPENCLAW_DATA_DIR:-./.data/openclaw}:/home/node/.openclaw-gateway:ro
@@ -91,3 +100,39 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  openclaw-bot-view:
+    profiles: ["bot-view"]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/openclaw-bot-view.Dockerfile
+      args:
+        OPENCLAW_BOT_REVIEW_REF: ${OPENCLAW_BOT_REVIEW_REF:-81deb042b5caecf109db9f7fa031b5063b671e20}
+    image: clawharness/openclaw-bot-view:local
+    container_name: openclaw-bot-view
+    restart: unless-stopped
+    depends_on:
+      openclaw-gateway:
+        condition: service_healthy
+      harness-bridge:
+        condition: service_healthy
+    ports:
+      - "${OPENCLAW_BOT_VIEW_PUBLISH_ADDR:-127.0.0.1}:3001:3000"
+    environment:
+      OPENCLAW_HOME: /opt/openclaw
+      HARNESS_BASE_URL: ${HARNESS_BASE_URL:-http://harness-bridge:8080}
+      HARNESS_API_TOKEN: ${HARNESS_API_TOKEN:-}
+      HARNESS_READONLY_TOKEN: ${HARNESS_READONLY_TOKEN:-}
+    volumes:
+      - ${OPENCLAW_DATA_DIR:-./.data/openclaw}:/opt/openclaw:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:3000', (res) => process.exit(res.statusCode >= 200 && res.statusCode < 400 ? 0 : 1)).on('error', () => process.exit(1));",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5

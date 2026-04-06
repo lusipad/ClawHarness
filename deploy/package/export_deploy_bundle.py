@@ -11,10 +11,12 @@ SOURCE_DIRS = [
     ".dockerignore",
     "ado_client",
     "codex_acp_runner",
+    "github_client",
     "harness_runtime",
     "openclaw-plugin",
     "rocketchat_notifier",
     "run_store",
+    "workflow_provider",
     "deploy/config",
     "deploy/docker",
 ]
@@ -71,6 +73,10 @@ chmod +x up.sh down.sh healthcheck.sh
   - `OPENAI_BASE_URL`
   - `OPENAI_API_KEY`
   - `CODEX_MODEL`
+- 默认任务来源示例仍是 Azure DevOps；如果你要切到 GitHub，请同时：
+  - 修改 `src/deploy/config/providers.yaml`
+  - 填写 `GITHUB_TOKEN`
+  - 如启用 GitHub webhook，再填写 `GITHUB_WEBHOOK_SECRET`
 - 默认推荐只维护：
   - `OPENAI_BASE_URL`
   - `OPENAI_API_KEY`
