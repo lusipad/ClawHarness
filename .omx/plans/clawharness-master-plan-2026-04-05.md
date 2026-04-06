@@ -1,11 +1,38 @@
 # ClawHarness 总体主计划
 
 日期：2026-04-05
-状态：统一主计划
+状态：统一主计划，已补 2026-04-06 实现状态
 替代：
 - `.omx/plans/clawharness-architecture-2026-04-05.md`
 - `.omx/plans/clawharness-mvp-technical-design-2026-04-05.md`
 - `.omx/plans/clawharness-support-matrix-2026-04-05.md`
+
+## 2026-04-06 状态快照
+
+已真实验证：
+
+- Azure DevOps task -> branch -> PR
+- 同父 run 的 PR feedback 恢复
+- 同父 run 的 CI recovery 自动修复与自动重试
+- Docker 栈：
+  - `openclaw-gateway`
+  - `clawharness-bridge`
+  - `openclaw-bot-view`
+
+已实现并通过本地验证：
+
+- provider-neutral runtime
+- GitHub adapter 与 checks / review 恢复路径
+- Rocket.Chat 命令入口
+- 图片分析工件链路
+- skill registry
+- maintenance 清理入口
+
+仍未完成真实外部联调：
+
+- GitHub live webhook 闭环
+  - 当前原因：`GITHUB_TOKEN` 未配置
+- Linux systemd 的更广泛真实部署覆盖
 
 ## 目标
 
@@ -193,9 +220,11 @@ V1 以以下验收点为准：
 
 ## 当前结论
 
-截至 `2026-04-05`：
+截至 `2026-04-06`：
 
 - 任务到分支到 PR 主链路已真实验证
 - PR 反馈恢复链路已真实验证
-- CI 恢复链路实现完成，但目标验证项目缺少真实 CI build 资源，无法做 live 闭环
-- Docker / Linux / 受保护分支等更强环境约束仍需继续验证
+- CI 恢复链路已完成真实 live 闭环
+- Docker + bot-view sidecar 已真实验证
+- GitHub adapter 已实现并通过本地测试，但 GitHub live 仍受 `GITHUB_TOKEN` 阻塞
+- Linux / 更严格受保护分支策略等更强环境约束仍需继续验证

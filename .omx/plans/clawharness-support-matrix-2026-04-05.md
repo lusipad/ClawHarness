@@ -3,10 +3,28 @@
 已被替代：`.omx/plans/clawharness-master-plan-2026-04-05.md`
 
 日期：2026-04-05
-状态：归档中的支持矩阵基线
+状态：归档中的支持矩阵基线，已补 2026-04-06 状态快照
 依赖：
 - `.omx/plans/clawharness-architecture-2026-04-05.md`
 - `.omx/plans/clawharness-mvp-technical-design-2026-04-05.md`
+
+## 归档状态更新
+
+截至 `2026-04-06` 的实际支持状态：
+
+- 任务 / PR / CI provider
+  - Azure DevOps：已实现，已真实验证
+  - GitHub：已实现，已通过本地测试，live 联调阻塞于 `GITHUB_TOKEN`
+- 聊天 provider
+  - Rocket.Chat webhook / command：已实现
+  - Weixin：仍处于规划项
+- 编码执行器
+  - OpenClaw 路径：已实现
+  - 本地 Codex CLI backend：已实现
+- 打包形态
+  - Docker：已真实验证
+  - Windows 原生：本机安装与运行已验证
+  - Linux systemd：部署资产已提供，但更广泛真实覆盖仍待补
 
 ## 用途
 

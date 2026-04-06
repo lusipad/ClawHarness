@@ -38,6 +38,8 @@ ClawHarness 是一个面向 Azure DevOps 与 GitHub 仓库的自主化任务到 
 
 ## 当前状态
 
+- 最新本地验证结果：
+  `python -m unittest discover -s tests -v` -> `121/121` 通过
 - Azure DevOps 的 task -> branch -> PR 真实闭环已经跑通
 - 同父 run 的 PR feedback 恢复已经真实跑通
 - 同父 run 的 CI recovery 已完成真实端到端闭环：
@@ -46,6 +48,13 @@ ClawHarness 是一个面向 Azure DevOps 与 GitHub 仓库的自主化任务到 
   `openclaw-gateway`、`clawharness-bridge`、`openclaw-bot-view`
 - Windows self-hosted Azure agent 的 PowerShell 环境问题已完成真实排障和修复，修复方式已写入 `deploy/README.md`
 - GitHub provider 的代码与本地测试已就绪，但真实 GitHub webhook 联调仍受 `GITHUB_TOKEN` 未配置阻塞
+
+## 当前推荐用法
+
+- 默认优先使用 Docker 部署
+- 如果你现在就要走真实闭环，优先选 Azure DevOps
+- 如果你想在浏览器里看 OpenClaw 和 ClawHarness 的运行状态，建议同时开启可选的 `bot-view` profile
+- GitHub 当前属于“代码与本地测试已完成，但真实 webhook 还没验”的状态，适合继续联调，不适合宣称已完成 live
 
 ## 当前 V2 交付能力
 
@@ -60,6 +69,25 @@ ClawHarness 是一个面向 Azure DevOps 与 GitHub 仓库的自主化任务到 
 - 运行时现在提供 retention 驱动的 maintenance 入口，可清理过期终态 workspace，同时不影响活跃 run 的恢复状态
 - Docker 现在支持可选的 `bot-view` profile，用于启动 OpenClaw dashboard sidecar
 - sidecar 中新增了 `/clawharness` 页面，可把 ClawHarness 的 run 与审计数据代理进 dashboard 观察面
+
+## 最快启动路径
+
+1. 把 `deploy/docker/.env.example` 复制成 `deploy/docker/.env`
+2. 至少填写这些变量：
+   `ADO_BASE_URL`、`ADO_PROJECT`、`ADO_PAT`、`OPENAI_API_KEY`、`OPENCLAW_GATEWAY_TOKEN`、`OPENCLAW_HOOKS_TOKEN`、`HARNESS_INGRESS_TOKEN`、`CODEX_MODEL`
+3. 启动服务栈：
+
+```sh
+docker compose --env-file deploy/docker/.env -f deploy/docker/compose.yml up --build -d
+```
+
+4. 如果还想要 dashboard sidecar，再执行：
+
+```sh
+docker compose --profile bot-view --env-file deploy/docker/.env -f deploy/docker/compose.yml up --build -d
+```
+
+5. 具体运维和配置细节看 `deploy/README.md`
 
 ## 快速开始
 

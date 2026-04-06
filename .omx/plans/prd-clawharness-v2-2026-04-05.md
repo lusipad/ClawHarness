@@ -1,11 +1,30 @@
 # ClawHarness V2 PRD 与路线图
 
 日期：2026-04-05
-状态：规划基线
+状态：规划基线，已补 2026-04-06 实施状态
 配套文档：
 - `.omx/plans/prd-clawharness-v1-2026-04-05.md`
 - `.omx/plans/test-spec-clawharness-v1-2026-04-05.md`
 - `.omx/plans/test-spec-clawharness-v2-2026-04-05.md`
+
+## 2026-04-06 实施状态快照
+
+当前里程碑状态：
+
+- V2.0 Core：已实现，并已在 Azure DevOps 上完成真实闭环验证
+- V2.1 Channels：核心能力已实现；Rocket.Chat 命令、图片工件、bot-view 只读观察面已落地
+- V2.2 Providers：Azure 路径已真实验证；GitHub adapter 已实现并通过本地测试，但 live webhook 仍受 `GITHUB_TOKEN` 阻塞
+- V2.3 Skills：skill registry、自动选择、审计记录、模板化部署方向已落地
+
+本轮新增的关键真实证据：
+
+- work item `45` -> run `manual-ai-review-test-45` -> PR `27`
+- failed build `42` -> `manual-ai-review-test-45--ci-recovery--f7ccbe33` -> successful build `43`
+- Windows self-hosted Azure agent 的 PowerShell 环境问题已完成真实排障并固化到部署文档
+
+证据入口：
+
+- `.omx/plans/evidence-clawharness-v2-2026-04-06.md`
 
 ## V1 基线
 
@@ -364,4 +383,4 @@ V2 最终收口必须满足以下结果：
 
 ## 当前结论
 
-截至 `2026-04-05`，ClawHarness 已完成 V1 的真实主闭环验证。V2 的首要工作不是继续堆单点能力，而是先把复杂任务的编排核心、可观察性和多 agent 运行面建立起来。后续所有渠道、图片、GitHub 和 skill 分发能力，都应建立在这个核心之上，而不是反过来驱动架构。
+截至 `2026-04-06`，ClawHarness 已不再停留在 V2 规划阶段，而是已经完成一轮可运行、可观察、可恢复的 V2 Core 交付，并在 Azure DevOps 上拿到了真实主闭环、PR feedback 恢复和 CI recovery 闭环证据。当前剩余的主要缺口不再是核心架构，而是 GitHub live webhook 联调和更广泛的部署覆盖验证。

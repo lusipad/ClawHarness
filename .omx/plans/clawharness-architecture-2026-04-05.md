@@ -3,8 +3,25 @@
 已被替代：`.omx/plans/clawharness-master-plan-2026-04-05.md`
 
 日期：2026-04-05
-状态：归档中的架构基线
+状态：归档中的架构基线，已补 2026-04-06 状态指针
 范围：面向内网部署的 AI 软件交付 Harness，支持可插拔的 DevOps、聊天与编码执行器
+
+## 归档状态更新
+
+截至 `2026-04-06`，这份架构稿里的核心判断已经在当前仓库中落地，并补齐了新的真实验证结果：
+
+- Azure DevOps task -> PR 已真实跑通
+- 同父 run 的 PR feedback 恢复已真实跑通
+- 同父 run 的 CI recovery 已真实跑通
+- Docker + bot-view sidecar 已在本机真实跑通
+- GitHub adapter 已实现并通过本地测试，但真实 webhook 联调仍受 `GITHUB_TOKEN` 未配置阻塞
+
+当前应优先参考：
+
+- `.omx/plans/clawharness-master-plan-2026-04-05.md`
+- `.omx/plans/prd-clawharness-v2-2026-04-05.md`
+- `.omx/plans/test-spec-clawharness-v2-2026-04-05.md`
+- `.omx/plans/evidence-clawharness-v2-2026-04-06.md`
 
 ## 架构目标
 

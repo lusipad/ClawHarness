@@ -3,8 +3,24 @@
 已被替代：`.omx/plans/clawharness-master-plan-2026-04-05.md`
 
 日期：2026-04-05
-状态：归档中的 MVP 技术设计
+状态：归档中的 MVP 技术设计，已补 2026-04-06 状态指针
 依赖：`.omx/plans/clawharness-architecture-2026-04-05.md`
+
+## 归档状态更新
+
+这份 MVP 设计中的“最小 runtime”判断已经被当前实际实现超出，当前代码基线至少已经具备：
+
+- 父子 run 图、checkpoint、artifact、审计链
+- provider-neutral runtime 与 adapter 契约
+- PR feedback / CI recovery 的 child-run continuation
+- 只读运行态 API 与 bot-view overlay
+- maintenance 清理入口
+
+真实验证状态以以下文档为准：
+
+- `.omx/plans/evidence-clawharness-v2-2026-04-06.md`
+- `.omx/plans/prd-clawharness-v2-2026-04-05.md`
+- `.omx/plans/test-spec-clawharness-v2-2026-04-05.md`
 
 ## 目标
 

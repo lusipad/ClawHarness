@@ -38,6 +38,8 @@ ClawHarness is an autonomous task-to-PR execution harness for Azure DevOps and G
 
 ## Current Status
 
+- Latest local verification:
+  `python -m unittest discover -s tests -v` -> `121/121` passed
 - Azure DevOps task-to-branch-to-PR is live-validated
 - Same-parent PR feedback recovery is live-validated
 - Same-parent CI recovery is live-validated end to end:
@@ -46,6 +48,13 @@ ClawHarness is an autonomous task-to-PR execution harness for Azure DevOps and G
   `openclaw-gateway`, `clawharness-bridge`, and `openclaw-bot-view`
 - The Windows self-hosted Azure agent issue has been live-debugged and fixed; the documented recovery path is now part of `deploy/README.md`
 - GitHub provider support is implemented and covered by local tests, but live GitHub webhook validation is still blocked because `GITHUB_TOKEN` is not configured
+
+## Recommended Today
+
+- Use Docker as the default deployment path
+- Use Azure DevOps if you want the fully live-validated provider path today
+- Turn on the optional `bot-view` profile if you want a browser dashboard for OpenClaw and ClawHarness runtime status
+- Treat GitHub as implemented-but-not-yet-live-validated until webhook delivery is exercised in a real repository
 
 ## Current V2 Delivery
 
@@ -60,6 +69,25 @@ ClawHarness is an autonomous task-to-PR execution harness for Azure DevOps and G
 - The runtime now ships a maintenance entry point for retention-based workspace cleanup without touching active run recovery state
 - Docker now includes an optional `bot-view` profile for an OpenClaw dashboard sidecar
 - The sidecar also exposes a `/clawharness` page that proxies ClawHarness run and audit data into the dashboard surface
+
+## Fastest Start
+
+1. Copy `deploy/docker/.env.example` to `deploy/docker/.env`
+2. Fill in at least:
+   `ADO_BASE_URL`, `ADO_PROJECT`, `ADO_PAT`, `OPENAI_API_KEY`, `OPENCLAW_GATEWAY_TOKEN`, `OPENCLAW_HOOKS_TOKEN`, `HARNESS_INGRESS_TOKEN`, and `CODEX_MODEL`
+3. Start the stack:
+
+```sh
+docker compose --env-file deploy/docker/.env -f deploy/docker/compose.yml up --build -d
+```
+
+4. Optionally start the dashboard sidecar:
+
+```sh
+docker compose --profile bot-view --env-file deploy/docker/.env -f deploy/docker/compose.yml up --build -d
+```
+
+5. Read the operational details in `deploy/README.md`
 
 ## Quick Start
 

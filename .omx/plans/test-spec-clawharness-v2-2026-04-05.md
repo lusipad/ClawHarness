@@ -1,10 +1,31 @@
 # ClawHarness V2 验收测试规范
 
 日期：2026-04-05
-状态：验收基线
+状态：验收基线，已补 2026-04-06 验收进展
 配套文档：
 - `.omx/plans/prd-clawharness-v2-2026-04-05.md`
 - `.omx/plans/prd-clawharness-v1-2026-04-05.md`
+
+## 2026-04-06 验收进展快照
+
+当前验收进展：
+
+- V2.0 Core
+  - 已实现
+  - 已完成 Azure DevOps 真实复杂任务闭环
+  - 已完成同父 run 的 PR feedback 与 CI recovery 真实验证
+- V2.1 Channels
+  - bot-view 只读状态面已实现
+  - Rocket.Chat 命令与图片工件链路已实现，并有本地与组件级验证
+- V2.2 Providers
+  - Azure DevOps：已真实验证
+  - GitHub：已实现并通过本地测试，真实联调仍受 `GITHUB_TOKEN` 阻塞
+- V2.3 Skills
+  - skill registry、自动选择、审计记录与 maintenance 已实现并通过本地验证
+
+证据入口：
+
+- `.omx/plans/evidence-clawharness-v2-2026-04-06.md`
 
 ## 验收目标
 
@@ -637,4 +658,4 @@ V2 至少要满足以下稳定性要求：
 
 ## 当前结论
 
-V2 的验收不应再沿用 V1 那种“单条 happy path 是否跑通”的思路，而应转为验证复杂任务编排、运行可视化、多 agent 恢复、多 provider 复用和长期工程化能力。只有这些维度同时成立，ClawHarness V2 才算真正完成。
+截至 `2026-04-06`，V2 的 Azure 主链路验收已经跨过了“只证明 happy path”的阶段，真实证据已经覆盖复杂任务主闭环、父子 run 图、PR feedback 恢复、CI failure 恢复、只读运行面和本地部署。当前剩余工作主要集中在 GitHub live webhook 联调以及更广泛的渠道 / 部署覆盖，而不是核心运行时能力缺失。
