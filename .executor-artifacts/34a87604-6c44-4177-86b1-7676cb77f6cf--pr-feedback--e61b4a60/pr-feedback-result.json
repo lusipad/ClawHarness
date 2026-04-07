@@ -1,0 +1,30 @@
+{
+  "status": "completed",
+  "summary": "Verified that branch refs/heads/ai/7-v2-github-live-end-to-end-pr-validation- at commit 03e262b3418a139eaff9c51bb4839b5701655c54 already contains the documentation updates requested by the active PR feedback. README.md already splits the Windows GitHub stdin rerun validation from the still-pending webhook-driven GitHub path, restores GitHub issue-to-PR to the remaining live-validation gaps, and README.zh-CN.md mirrors the same validation scope. No additional tracked repository edits were required in this resumed pass.",
+  "changed_files": [],
+  "checks": [
+    {
+      "command": "git diff --check",
+      "status": "passed"
+    },
+    {
+      "command": "python -m unittest discover -s tests -v",
+      "status": "passed",
+      "details": "121 tests"
+    },
+    {
+      "command": "python -m compileall ado_client codex_acp_runner github_client harness_runtime rocketchat_notifier run_store workflow_provider tests",
+      "status": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "status": "passed",
+      "details": "re-run after verification"
+    }
+  ],
+  "follow_up": [
+    "Harness can publish this completion summary on PR #8 and reply to the active review threads; no commit, push, or new PR is required because the existing branch head already contains the requested documentation updates.",
+    "If thread-specific wording is needed, cite that README.md already separates the live-validated Windows stdin rerun path from the webhook-pending GitHub path and that README.zh-CN.md now matches the same scope.",
+    "The only new worktree entry from this executor pass is the required untracked artifact at .executor-artifacts/34a87604-6c44-4177-86b1-7676cb77f6cf--pr-feedback--e61b4a60/pr-feedback-result.json."
+  ]
+}
