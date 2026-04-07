@@ -47,14 +47,14 @@ ClawHarness is an autonomous task-to-PR execution harness for Azure DevOps and G
 - The local Docker stack is live-validated with:
   `openclaw-gateway`, `clawharness-bridge`, and `openclaw-bot-view`
 - The Windows self-hosted Azure agent issue has been live-debugged and fixed; the documented recovery path is now part of `deploy/README.md`
-- GitHub provider support is implemented and covered by local tests, but live GitHub webhook validation is still blocked because `GITHUB_TOKEN` is not configured
+- GitHub issue-to-PR on Windows is now live-validated for the harness stdin rerun path; live webhook validation for PR feedback and checks recovery still remains blocked until `GITHUB_TOKEN` is configured
 
 ## Recommended Today
 
 - Use Docker as the default deployment path
 - Use Azure DevOps if you want the fully live-validated provider path today
 - Turn on the optional `bot-view` profile if you want a browser dashboard for OpenClaw and ClawHarness runtime status
-- Treat GitHub as implemented-but-not-yet-live-validated until webhook delivery is exercised in a real repository
+- Treat the Windows GitHub issue-to-PR path as live-validated, but keep PR feedback and checks recovery scoped as implemented until webhook delivery is exercised in a real repository
 
 ## Current V2 Delivery
 
@@ -123,6 +123,6 @@ The current implementation is already live-validated on the Azure-based core loo
 
 The main remaining gaps that still need broader live validation are:
 
-- GitHub issue-to-PR and checks recovery in a real repository with live webhook delivery
+- GitHub PR feedback and checks recovery in a real repository with live webhook delivery
 - policy interaction in repositories with stricter protected-branch and review rules
 - broader Linux native and non-local deployment validation
