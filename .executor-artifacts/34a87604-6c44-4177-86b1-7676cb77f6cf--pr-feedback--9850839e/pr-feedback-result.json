@@ -1,0 +1,29 @@
+{
+  "status": "completed",
+  "summary": "Verified branch refs/heads/ai/7-v2-github-live-end-to-end-pr-validation- at commit 8d8fcbb6627eb30a518a603c78cc2ac2605b93e1 already contains the documentation updates requested by the active PR feedback. README.md already separates the live-validated Windows stdin rerun path from the still-pending webhook path, restores webhook-driven GitHub issue-to-PR coverage to the remaining live-validation gaps, and README.zh-CN.md mirrors the same validation scope. No additional workspace edits were required in this resumed pass.",
+  "changed_files": [],
+  "checks": [
+    {
+      "name": "git diff --check",
+      "status": "passed"
+    },
+    {
+      "name": "python -m unittest discover -s tests -v",
+      "status": "passed",
+      "details": "121 tests"
+    },
+    {
+      "name": "python -m compileall ado_client codex_acp_runner github_client harness_runtime rocketchat_notifier run_store workflow_provider tests",
+      "status": "passed"
+    },
+    {
+      "name": "git status --short",
+      "status": "passed",
+      "details": "clean worktree"
+    }
+  ],
+  "follow_up": [
+    "Harness can post this verification summary to PR #8 and resolve the active review threads.",
+    "No new commit or push is required from this resumed pass."
+  ]
+}
