@@ -47,14 +47,15 @@ ClawHarness 是一个面向 Azure DevOps 与 GitHub 仓库的自主化任务到 
 - 本地 Docker 栈已完成真实验证：
   `openclaw-gateway`、`clawharness-bridge`、`openclaw-bot-view`
 - Windows self-hosted Azure agent 的 PowerShell 环境问题已完成真实排障和修复，修复方式已写入 `deploy/README.md`
-- GitHub provider 的代码与本地测试已就绪，但真实 GitHub webhook 联调仍受 `GITHUB_TOKEN` 未配置阻塞
+- Windows 上的 GitHub issue -> PR 已通过 harness stdin rerun 路径完成真实验证
+- GitHub issue -> PR、PR feedback 与 checks recovery 的真实 webhook 联调仍受 `GITHUB_TOKEN` 未配置阻塞
 
 ## 当前推荐用法
 
 - 默认优先使用 Docker 部署
 - 如果你现在就要走真实闭环，优先选 Azure DevOps
 - 如果你想在浏览器里看 OpenClaw 和 ClawHarness 的运行状态，建议同时开启可选的 `bot-view` profile
-- GitHub 当前属于“代码与本地测试已完成，但真实 webhook 还没验”的状态，适合继续联调，不适合宣称已完成 live
+- Windows GitHub issue -> PR 的 stdin rerun 路径可以视为已完成 live 验证，但 webhook 驱动的 GitHub 链路仍应视为待在真实仓库中继续验证
 
 ## 当前 V2 交付能力
 
@@ -123,6 +124,6 @@ python -m harness_runtime.main --task-id <task-id> --repo-id <repo-id> [--provid
 
 当前仍需要补齐更广泛真实环境验证的部分主要是：
 
-- 真实 GitHub issue 到 PR、以及 checks 恢复链路的 live webhook 验证
+- 真实 GitHub issue 到 PR、PR feedback 与 checks 恢复链路的 live webhook 验证
 - 受保护分支和评审策略更严格的仓库策略联动
 - Linux 原生和非本机环境部署的更广覆盖验证
