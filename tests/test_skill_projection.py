@@ -55,6 +55,10 @@ class SkillProjectionTests(unittest.TestCase):
             "OpenClaw Skill 兼容镜像",
             (self.repo_root / "openclaw-plugin" / "skills" / "README.md").read_text(encoding="utf-8"),
         )
+        self.assertIn(
+            "`openclaw-plugin/openclaw.plugin.json`",
+            (self.repo_root / "openclaw-plugin" / "skills" / "README.md").read_text(encoding="utf-8"),
+        )
         self.assertEqual(
             "# analyze-task\n",
             (self.repo_root / "openclaw-plugin" / "skills" / "analyze-task" / "SKILL.md").read_text(encoding="utf-8"),
