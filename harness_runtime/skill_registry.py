@@ -155,15 +155,41 @@ class SkillRegistry:
         )
 
 
-def default_skill_registry_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "openclaw-plugin" / "skills" / "registry.json"
+def canonical_skill_registry_path(repo_root: str | Path | None = None) -> Path:
+    root = _repo_root(repo_root)
+    return root / "skills" / "core" / "registry.json"
 
 
-def load_default_skill_registry() -> SkillRegistry:
-    path = default_skill_registry_path()
+def legacy_skill_registry_path(repo_root: str | Path | None = None) -> Path:
+    root = _repo_root(repo_root)
+    return root / "openclaw-plugin" / "skills" / "registry.json"
+
+
+def candidate_skill_registry_paths(repo_root: str | Path | None = None) -> tuple[Path, ...]:
+    return (
+        canonical_skill_registry_path(repo_root),
+        legacy_skill_registry_path(repo_root),
+    )
+
+
+def default_skill_registry_path(repo_root: str | Path | None = None) -> Path:
+    for candidate in candidate_skill_registry_paths(repo_root):
+        if candidate.exists():
+            return candidate
+    return canonical_skill_registry_path(repo_root)
+
+
+def load_default_skill_registry(repo_root: str | Path | None = None) -> SkillRegistry:
+    path = default_skill_registry_path(repo_root)
     if not path.exists():
         return SkillRegistry(registry_version="missing", definitions=())
     return SkillRegistry.from_path(path)
+
+
+def _repo_root(repo_root: str | Path | None) -> Path:
+    if repo_root is not None:
+        return Path(repo_root)
+    return Path(__file__).resolve().parents[1]
 
 
 def _require_string(mapping: Mapping[str, Any], key: str) -> str:
