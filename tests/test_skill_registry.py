@@ -34,15 +34,14 @@ class SkillRegistryTests(unittest.TestCase):
             ],
         }
         self.registry_path = self.repo_root / "registry.json"
-        self.registry_path.write_text(
-            json.dumps(
-                self.registry_payload
-            ),
-            encoding="utf-8",
-        )
+        self._write_registry(self.registry_path, self.registry_payload)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+
+    def _write_registry(self, path: Path, payload: dict[str, object]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
 
     def test_select_matches_skill_by_run_kind_and_role(self) -> None:
         registry = SkillRegistry.from_path(self.registry_path)
@@ -64,26 +63,33 @@ class SkillRegistryTests(unittest.TestCase):
 
     def test_default_skill_registry_path_prefers_canonical_source(self) -> None:
         canonical_path = canonical_skill_registry_path(self.repo_root)
-        canonical_path.parent.mkdir(parents=True, exist_ok=True)
-        canonical_path.write_text(json.dumps(self.registry_payload), encoding="utf-8")
+        self._write_registry(canonical_path, self.registry_payload)
 
         legacy_path = legacy_skill_registry_path(self.repo_root)
-        legacy_path.parent.mkdir(parents=True, exist_ok=True)
-        legacy_path.write_text(json.dumps({"version": "legacy", "skills": []}), encoding="utf-8")
+        self._write_registry(legacy_path, {"version": "legacy", "skills": []})
 
         self.assertEqual(canonical_path, default_skill_registry_path(self.repo_root))
+        self.assertTrue(canonical_path.exists())
+        self.assertTrue(legacy_path.exists())
 
     def test_default_skill_registry_path_falls_back_to_legacy_source(self) -> None:
         legacy_path = legacy_skill_registry_path(self.repo_root)
-        legacy_path.parent.mkdir(parents=True, exist_ok=True)
-        legacy_path.write_text(json.dumps(self.registry_payload), encoding="utf-8")
+        self._write_registry(legacy_path, self.registry_payload)
 
         self.assertEqual(legacy_path, default_skill_registry_path(self.repo_root))
 
     def test_load_default_skill_registry_reads_canonical_source(self) -> None:
         canonical_path = canonical_skill_registry_path(self.repo_root)
-        canonical_path.parent.mkdir(parents=True, exist_ok=True)
-        canonical_path.write_text(json.dumps(self.registry_payload), encoding="utf-8")
+        self._write_registry(canonical_path, self.registry_payload)
+
+        registry = load_default_skill_registry(self.repo_root)
+
+        self.assertEqual("2026-04-06", registry.registry_version)
+        self.assertEqual(["analyze-task"], [item.skill_id for item in registry.definitions])
+
+    def test_load_default_skill_registry_falls_back_to_legacy_source(self) -> None:
+        legacy_path = legacy_skill_registry_path(self.repo_root)
+        self._write_registry(legacy_path, self.registry_payload)
 
         registry = load_default_skill_registry(self.repo_root)
 
