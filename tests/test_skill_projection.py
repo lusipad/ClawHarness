@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from harness_runtime.skill_projection import project_openclaw_skills
+from harness_runtime.skill_projection import project_openclaw_skills, verify_openclaw_skill_projection
 
 
 class SkillProjectionTests(unittest.TestCase):
@@ -51,6 +51,10 @@ class SkillProjectionTests(unittest.TestCase):
         payload = json.loads(registry_path.read_text(encoding="utf-8"))
         self.assertEqual("2026-04-09", payload["version"])
         self.assertEqual("openclaw-plugin/skills/analyze-task", payload["skills"][0]["source"])
+        self.assertIn(
+            "OpenClaw Skill 兼容镜像",
+            (self.repo_root / "openclaw-plugin" / "skills" / "README.md").read_text(encoding="utf-8"),
+        )
         self.assertEqual(
             "# analyze-task\n",
             (self.repo_root / "openclaw-plugin" / "skills" / "analyze-task" / "SKILL.md").read_text(encoding="utf-8"),
@@ -70,6 +74,14 @@ class SkillProjectionTests(unittest.TestCase):
         project_openclaw_skills(self.repo_root)
 
         self.assertFalse(stale_root.exists())
+
+    def test_verify_openclaw_skill_projection_rejects_drift(self) -> None:
+        project_openclaw_skills(self.repo_root)
+        registry_path = self.repo_root / "openclaw-plugin" / "skills" / "registry.json"
+        registry_path.write_text("drift\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "drift detected"):
+            verify_openclaw_skill_projection(self.repo_root)
 
 
 if __name__ == "__main__":
