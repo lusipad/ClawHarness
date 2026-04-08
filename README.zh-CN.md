@@ -13,6 +13,8 @@ ClawHarness 是一个面向 Azure DevOps 与 GitHub 仓库的自主化任务到 
 - 自动创建 PR，并为每次运行保留审计记录
 - 支持通过 webhook 继续处理 PR 反馈和 CI 故障恢复
 - 支持 Azure DevOps 与 GitHub 的 provider-neutral 路由
+- 支持离线 `local-task` 模式，可直接消费本地仓库、本地任务文件和本地 review 工件
+- 支持导出可搬运部署包，并提供 `load-images` / `up-offline` 脚本用于无外网环境
 - 提供 Windows、Linux systemd 和 Docker 部署资产
 
 ## 仓库结构
@@ -21,16 +23,19 @@ ClawHarness 是一个面向 Azure DevOps 与 GitHub 仓库的自主化任务到 
 - `codex_acp_runner/`：ACP 执行器封装与结构化结果处理
 - `github_client/`：GitHub REST 客户端，负责 issue、PR 评论与 checks 操作
 - `harness_runtime/`：Bridge 服务、编排逻辑与运行时配置加载
+- `local_client/`：本地离线任务 provider，负责本地仓库、本地任务文件与本地 review 工件流程
 - `rocketchat_notifier/`：Rocket.Chat webhook 通知器
 - `run_store/`：SQLite schema 与运行态持久化原语
+- `skills/`：ClawHarness 的 canonical skill source 与 registry
 - `workflow_provider/`：共享的 provider-neutral 事件与客户端契约
-- `openclaw-plugin/`：OpenClaw 插件入口、hooks、flows 与 skills
+- `openclaw-plugin/`：OpenClaw 插件入口、hooks、flows，以及供 OpenClaw 消费的生成 skill 镜像
 - `deploy/`：Docker、systemd、Windows 以及配置模板
 - `.omx/plans/`：PRD、测试规范、PDCA 记录与验收证据
 
 ## 文档索引
 
 - `deploy/README.md`：部署方式、配置项与运维说明
+- `skills/README.md`：canonical skill 归属与投影说明
 - `.omx/plans/prd-clawharness-v2-2026-04-05.md`：V2 产品定义与范围
 - `.omx/plans/test-spec-clawharness-v2-2026-04-05.md`：V2 验收标准与测试门槛
 - `.omx/plans/evidence-clawharness-v2-2026-04-06.md`：最新 V2 真实验收证据
@@ -39,36 +44,58 @@ ClawHarness 是一个面向 Azure DevOps 与 GitHub 仓库的自主化任务到 
 ## 当前状态
 
 - 最新本地验证结果：
-  `python -m unittest discover -s tests -v` -> `121/121` 通过
+  `python -m unittest discover -s tests -v` -> `158/158` 通过
 - Azure DevOps 的 task -> branch -> PR 真实闭环已经跑通
 - 同父 run 的 PR feedback 恢复已经真实跑通
 - 同父 run 的 CI recovery 已完成真实端到端闭环：
   work item `45` -> run `manual-ai-review-test-45` -> PR `27` -> 失败 build `42` -> 子 run `manual-ai-review-test-45--ci-recovery--f7ccbe33` -> 成功重试 build `43`
+- PR merge 收口现在也已经完成真实验证：
+  合并事件会统一归一化成 `pr.merged`，根 run 自动置为 `completed`，并在 provider 支持时自动回写任务完成状态
+- Azure hello-world 的最终闭环现在已完成端到端验证：
+  work item `46` -> run `manual-ai-review-test-46` -> PR `28` -> build `44` -> PR merged -> run completed -> Azure work item completed
 - 本地 Docker 栈已完成真实验证：
   `openclaw-gateway`、`clawharness-bridge`、`openclaw-bot-view`
+- 离线 Docker 的 `local-task` 主链路现已完成真实端到端验证：
+  task file `task-002` -> run `manual-local-repo-task-002` -> branch `refs/heads/ai/task-002-add-offline-validation-note` -> 本地 commit `4cca6c1` -> 本地 review 工件 `local-0eedc568`
+- 默认离线安全策略也已完成真实验证：
+  当 `LOCAL_PUSH_ENABLED=0` 时，源仓库保持不变，只有隔离 workspace 会生成分支和提交
+- `bot-view` 控制面已经在 Docker 栈上完成真实验证：
+  `/clawharness` 读接口、`Pause`、`Resume`、`Add Context` 以及审计链更新都已经对真实 run 跑通
 - Windows self-hosted Azure agent 的 PowerShell 环境问题已完成真实排障和修复，修复方式已写入 `deploy/README.md`
-- GitHub provider 的代码与本地测试已就绪，但真实 GitHub webhook 联调仍受 `GITHUB_TOKEN` 未配置阻塞
+- GitHub provider 现在已经完成 live webhook 入口验证：通过 `smee.io` 把真实 GitHub issue 事件转发到本机临时 bridge，并成功创建 GitHub-backed run、准备 Windows 工作区
+- GitHub 在 Windows 上的 issue -> PR stdin 重跑链路已经完成真实验证：
+  issue `#7` -> run `34a87604-6c44-4177-86b1-7676cb77f6cf` -> PR `8`
+- GitHub 的 PR feedback 与 checks recovery 仍然是“能力已实现，但还需要在真实 webhook 仓库里补更广泛验收”的状态
 
 ## 当前推荐用法
 
 - 默认优先使用 Docker 部署
 - 如果你现在就要走真实闭环，优先选 Azure DevOps
 - 如果你想在浏览器里看 OpenClaw 和 ClawHarness 的运行状态，建议同时开启可选的 `bot-view` profile
-- GitHub 当前属于“代码与本地测试已完成，但真实 webhook 还没验”的状态，适合继续联调，不适合宣称已完成 live
+- 如果你要启用可交互的 `bot-view` 控制面，请设置 `HARNESS_CONTROL_TOKEN`；如果要把只读和控制分权，再额外设置 `HARNESS_API_TOKEN` 或 `HARNESS_READONLY_TOKEN`
+- GitHub 当前可把“Windows issue -> PR stdin 重跑链路”视为已真实验证，但 PR feedback 与 checks recovery 仍应按“待补更广泛 webhook 验证”对外表述
 
 ## 当前 V2 交付能力
 
 - bridge 现在已经提供只读运行态 API，可查询 run 汇总、run 列表、run 详情、审计时间线和 run graph
+- bridge 现在还提供了受控的 `POST /api/runs/<run_id>/command`，可审计地执行 `pause`、`resume`、`add-context`、`escalate`
+- PR merge 事件现在会通过 provider-neutral 的 `pr.merged` 自动把根 run 收口为 `completed`
+- 根 run 完成后，bridge 现在会自动尝试回写 provider 侧任务状态；Azure DevOps 与 GitHub 都已接入这条路径
+- 如果任务回写失败，run 仍保持 `completed`，同时把失败原因记为 `task_completion_sync_failed` 审计事件，不回滚主闭环
 - PR 反馈与 CI 故障恢复现在会在同一父 run 下创建恢复子 run，并记录 checkpoint 与 artifact
 - PR 反馈与 CI 故障恢复现在按“父 run + 恢复类型”做 single-flight 保护，并把 follow-up 锁预算至少覆盖 executor timeout 且额外预留 300 秒缓冲，避免同一分支/工作区上并发恢复互相踩踏
 - Rocket.Chat 入站命令现在已经支持 `status`、`detail`、`pause`、`resume`、`add-context`、`escalate`，并具备对话线程绑定与命令审计
+- 新增了 Weixin 兼容命令入口 `POST /webhooks/chat/weixin`，沿用同一套命令语义
 - 通过聊天追加的图片附件现在会自动走 OpenAI 兼容 `responses` 接口分析，并以 `image-analysis` 形式写回 run 证据链
 - 运行时核心现在已经通过 provider adapter 处理 task、PR feedback 与 CI recovery，不再直接绑定 Azure 私有动作名
 - GitHub issue、PR 评论与 checks failure 现在会进入与 Azure DevOps 相同的 run graph、状态机与恢复链路
 - 运行时现在会按 run 类型与 agent 角色自动选择带版本号的 ClawHarness skill pack，并把选择结果写入 run 证据链，便于审计
 - 运行时现在提供 retention 驱动的 maintenance 入口，可清理过期终态 workspace，同时不影响活跃 run 的恢复状态
 - Docker 现在支持可选的 `bot-view` profile，用于启动 OpenClaw dashboard sidecar
-- sidecar 中新增了 `/clawharness` 页面，可把 ClawHarness 的 run 与审计数据代理进 dashboard 观察面
+- sidecar 中新增了 `/clawharness` 页面，可把 ClawHarness 的 run 与审计数据代理进 dashboard 观察面，并额外汇总闭环状态卡与人工干预态势，同时提供 `Pause`、`Resume`、`Escalate`、`Add Context` 控制区
+- 运行时新增了 `local-task` provider，可在离线或实验环境中走“本地任务文件 -> 本地工作区 clone -> 本地分支 -> 本地提交 -> 本地 review 工件”闭环
+- 部署包导出器现在会额外生成 `load-images` 与 `up-offline` 脚本，便于把 Docker 部署目录整体搬到离线机器直接启动
+- executor 结果解析现在可以兼容模型返回的字符串型 `checks`，会自动归一化成 informational 项，而不会因为解析失败中断主链路
 
 ## 最快启动路径
 
@@ -87,7 +114,47 @@ docker compose --env-file deploy/docker/.env -f deploy/docker/compose.yml up --b
 docker compose --profile bot-view --env-file deploy/docker/.env -f deploy/docker/compose.yml up --build -d
 ```
 
+如果希望 dashboard 支持交互控制，请同时设置 `HARNESS_CONTROL_TOKEN`。
+如果只想暴露只读 dashboard，可设置 `HARNESS_API_TOKEN` 或 `HARNESS_READONLY_TOKEN`。
+当只配置了 `HARNESS_CONTROL_TOKEN` 时，sidecar 的只读代理现在也会自动回退使用它。
+
 5. 具体运维和配置细节看 `deploy/README.md`
+
+## 离线模式
+
+如果目标环境不方便接 Azure DevOps 或 GitHub，ClawHarness 现在支持 `local-task` 本地闭环：
+
+- 把 `deploy/config/providers.yaml` 切到 `local-task` 示例
+- 配置 `LOCAL_REPO_PATH`、`LOCAL_TASKS_PATH`、`LOCAL_REVIEW_PATH`
+- 用本地任务文件触发一次运行
+
+示例：
+
+```sh
+python -m harness_runtime.main --provider-type local-task --task-id task-001
+```
+
+如果 `local-task.repository_path` 已配置，`--repo-id` 可以省略。
+运行完成后会在 `.clawharness-review/` 或 `LOCAL_REVIEW_PATH` 下生成本地 review markdown 工件。
+
+如果你要把 Docker 方案带到离线机器：
+
+1. 导出独立部署包：
+
+```sh
+python deploy/package/export_deploy_bundle.py --output dist/clawharness-deploy --force
+```
+
+2. 在有网机器准备镜像并导出：
+
+```sh
+docker save -o clawharness-images.tar \
+  clawharness/openclaw-gateway:local \
+  clawharness/harness-bridge:local \
+  clawharness/openclaw-bot-view:local
+```
+
+3. 将部署包和 `clawharness-images.tar` 一起复制到目标机器，先执行 `load-images`，再执行 `up-offline`。
 
 ## 快速开始
 
@@ -101,7 +168,7 @@ docker compose --profile bot-view --env-file deploy/docker/.env -f deploy/docker
 
 ```sh
 python -m unittest discover -s tests -v
-python -m compileall ado_client codex_acp_runner github_client harness_runtime rocketchat_notifier run_store workflow_provider tests
+python -m compileall ado_client codex_acp_runner github_client harness_runtime local_client rocketchat_notifier run_store workflow_provider tests
 ```
 
 5. 手工触发一次任务运行：
@@ -119,10 +186,12 @@ python -m harness_runtime.main --task-id <task-id> --repo-id <repo-id> [--provid
 - 本地检查门禁
 - 分支推送
 - PR 创建
+- PR 合并后自动收口 run
+- run 完成后自动回写 provider 侧任务状态
 - PR 反馈与 CI 恢复后的同父 run 子链路续跑，并保留子 run 证据
 
 当前仍需要补齐更广泛真实环境验证的部分主要是：
 
-- 真实 GitHub issue 到 PR、以及 checks 恢复链路的 live webhook 验证
+- 真实 GitHub PR feedback 与 checks recovery 链路的 live webhook 验证
 - 受保护分支和评审策略更严格的仓库策略联动
 - Linux 原生和非本机环境部署的更广覆盖验证
