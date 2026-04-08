@@ -5,14 +5,13 @@ import json
 import os
 from pathlib import Path
 
-from ado_client import AzureDevOpsRestClient
 from codex_acp_runner import CodexAcpRunner, CodexCliRunner
-from github_client import GitHubRestClient
 from rocketchat_notifier import RocketChatNotifier
 from run_store import RunStore
 from workflow_provider import WorkflowProviderClient
 
 from .bridge import HarnessBridge
+from .capability_registry import load_default_capability_registry
 from .config import load_harness_runtime_config
 from .image_analyzer import OpenAIImageAnalyzer
 from .maintenance import RunMaintenanceService
@@ -50,22 +49,10 @@ def main() -> int:
     store = RunStore(config.runtime.sqlite_path)
     store.initialize()
 
-    provider_clients: dict[str, WorkflowProviderClient] = {}
-    ado_client = None
-    if config.azure_devops is not None:
-        ado_client = AzureDevOpsRestClient(
-            base_url=config.azure_devops.base_url,
-            project=config.azure_devops.project,
-            pat=config.azure_devops.pat,
-        )
-        provider_clients["azure-devops"] = ado_client
-    github_client = None
-    if config.github is not None:
-        github_client = GitHubRestClient(
-            base_url=config.github.base_url,
-            token=config.github.token,
-        )
-        provider_clients["github"] = github_client
+    capability_registry = load_default_capability_registry()
+    provider_clients: dict[str, WorkflowProviderClient] = capability_registry.instantiate_task_providers(config)
+    ado_client = provider_clients.get("azure-devops")
+    github_client = provider_clients.get("github")
     openclaw_client = OpenClawWebhookClient(
         base_url=config.openclaw_hooks.base_url,
         token=config.openclaw_hooks.token,
@@ -110,8 +97,12 @@ def main() -> int:
         )
 
     if args.task_id:
-        if not args.repo_id:
-            parser.error("--repo-id is required when --task-id is provided")
+        effective_provider_type = args.provider_type or config.default_task_provider
+        effective_repo_id = args.repo_id
+        if not effective_repo_id and effective_provider_type == "local-task" and config.local_task is not None:
+            effective_repo_id = config.local_task.repository_path
+        if not effective_repo_id:
+            parser.error("--repo-id is required when --task-id is provided unless local-task.repository_path is configured")
         orchestrator = TaskRunOrchestrator(
             config=config,
             store=store,
@@ -122,8 +113,8 @@ def main() -> int:
         )
         run, task_context = orchestrator.claim_manual_task(
             task_id=str(args.task_id),
-            repo_id=str(args.repo_id),
-            provider_type=args.provider_type,
+            repo_id=str(effective_repo_id),
+            provider_type=effective_provider_type,
             source_id=args.source_id,
         )
         final_run = orchestrator.run_claimed_task(run.run_id, task_context=task_context)
@@ -175,6 +166,7 @@ def main() -> int:
         port=args.port,
         ingress_token=config.ingress_token,
         readonly_token=config.readonly_token,
+        control_token=config.control_token,
         chat_command_token=config.rocketchat.command_token,
         github_webhook_secret=config.github.webhook_secret if config.github is not None else None,
     )

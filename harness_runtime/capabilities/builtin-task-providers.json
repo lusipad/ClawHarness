@@ -1,0 +1,21 @@
+{
+  "id": "clawharness-builtin-task-providers",
+  "version": "2026-04-09",
+  "capabilities": [
+    {
+      "type": "task-provider",
+      "id": "azure-devops",
+      "factory": "harness_runtime.provider_factories:create_azure_devops_task_provider"
+    },
+    {
+      "type": "task-provider",
+      "id": "github",
+      "factory": "harness_runtime.provider_factories:create_github_task_provider"
+    },
+    {
+      "type": "task-provider",
+      "id": "local-task",
+      "factory": "harness_runtime.provider_factories:create_local_task_provider"
+    }
+  ]
+}
