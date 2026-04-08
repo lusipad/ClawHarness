@@ -1,76 +1,78 @@
-# Draft flow outline for the ClawHarness MVP.
-# This file is intentionally schema-light until the installed OpenClaw TaskFlow schema is verified.
-# The capability names are stable; the exact wrapper keys may change during implementation.
+# Draft orchestration outline for the ClawHarness task workflow.
+# This file intentionally stays as a reference-only flow contract:
+# - workflow owns stage ordering and references
+# - canonical skill text lives under skills/core
+# - capability implementations live behind the runtime/plugin registry
 
 id: task-run
 status: draft
 purpose: Take an eligible task from intake to PR creation and first CI wait.
 
-capabilities:
+capability_refs:
   runtime:
-    - claim_run
-    - transition_status
-    - save_audit
+    - capability_id: claim_run
+    - capability_id: transition_status
+    - capability_id: save_audit
   shared:
-    - task.get
-    - task.update_status
-    - repo.prepare_workspace
-    - executor.run_coding_task
-    - vcs.commit_and_push
-    - pr.create
-    - chat.post_update
+    - capability_id: task.get
+    - capability_id: task.update_status
+    - capability_id: repo.prepare_workspace
+    - capability_id: executor.run_coding_task
+    - capability_id: vcs.commit_and_push
+    - capability_id: pr.create
+    - capability_id: chat.post_update
 
-skills:
-  - analyze-task
-  - implement-task
+skill_refs:
+  - skill_id: analyze-task
+  - skill_id: implement-task
 
 steps:
   - id: validate-and-claim
     kind: runtime
-    uses: claim_run
+    capability_id: claim_run
     outcome: active run exists and task lock is held
 
   - id: load-task
     kind: capability
-    uses: task.get
+    capability_id: task.get
     outcome: normalized task payload available to the flow
 
   - id: planning
     kind: skill
-    uses: analyze-task
+    skill_id: analyze-task
     outcome: structured task plan with risks and impacted modules
 
   - id: prepare-workspace
     kind: capability
-    uses: repo.prepare_workspace
+    capability_id: repo.prepare_workspace
     outcome: clean per-run workspace path
 
   - id: coding
     kind: capability
-    uses: executor.run_coding_task
+    capability_id: executor.run_coding_task
     outcome: code changes, changed files, and check summary
 
   - id: verification-gate
     kind: control
-    uses: check-gate
+    capability_id: check-gate
     outcome: branch push is blocked unless required checks have run
 
   - id: publish-branch
     kind: capability
-    uses: vcs.commit_and_push
+    capability_id: vcs.commit_and_push
     outcome: branch pushed to the remote repository
 
   - id: open-pr
     kind: capability
-    uses: pr.create
+    capability_id: pr.create
     outcome: PR id and url recorded in the run
 
   - id: notify
     kind: capability
-    uses: chat.post_update
+    capability_id: chat.post_update
     outcome: lifecycle update sent to Rocket.Chat
 
   - id: finalize
     kind: runtime
-    uses: transition_status
+    capability_id: transition_status
     outcome: run moves to awaiting_ci or awaiting_review

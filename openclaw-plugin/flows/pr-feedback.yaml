@@ -1,56 +1,56 @@
-# Draft flow outline for PR feedback resume.
-# Validate against the installed OpenClaw TaskFlow schema before runtime use.
+# Draft orchestration outline for PR feedback resume.
+# This file is reference-only and does not carry canonical skill text.
 
 id: pr-feedback
 status: draft
 purpose: Resume an existing run after review feedback on the PR.
 
-capabilities:
+capability_refs:
   runtime:
-    - resolve_run_from_pr
-    - transition_status
+    - capability_id: resolve_run_from_pr
+    - capability_id: transition_status
   shared:
-    - pr.list_comments
-    - executor.run_coding_task
-    - vcs.commit_and_push
-    - pr.reply
-    - chat.post_update
+    - capability_id: pr.list_comments
+    - capability_id: executor.run_coding_task
+    - capability_id: vcs.commit_and_push
+    - capability_id: pr.reply
+    - capability_id: chat.post_update
 
-skills:
-  - fix-pr-feedback
+skill_refs:
+  - skill_id: fix-pr-feedback
 
 steps:
   - id: resolve-run
     kind: runtime
-    uses: resolve_run_from_pr
+    capability_id: resolve_run_from_pr
     outcome: existing run and session identified from pr_id
 
   - id: collect-feedback
     kind: capability
-    uses: pr.list_comments
+    capability_id: pr.list_comments
     outcome: unresolved review feedback collected
 
   - id: patch
     kind: skill
-    uses: fix-pr-feedback
+    skill_id: fix-pr-feedback
     outcome: patch plan generated for the current diff
 
   - id: coding
     kind: capability
-    uses: executor.run_coding_task
+    capability_id: executor.run_coding_task
     outcome: changes applied in the existing workspace
 
   - id: publish
     kind: capability
-    uses: vcs.commit_and_push
+    capability_id: vcs.commit_and_push
     outcome: updated branch pushed
 
   - id: reply
     kind: capability
-    uses: pr.reply
+    capability_id: pr.reply
     outcome: PR updated with a response summary
 
   - id: notify
     kind: capability
-    uses: chat.post_update
+    capability_id: chat.post_update
     outcome: review-follow-up status sent
