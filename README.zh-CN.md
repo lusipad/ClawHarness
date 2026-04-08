@@ -44,7 +44,7 @@ ClawHarness 是一个面向 Azure DevOps 与 GitHub 仓库的自主化任务到 
 ## 当前状态
 
 - 最新本地验证结果：
-  `python -m unittest discover -s tests -v` -> `158/158` 通过
+  `python -m unittest discover -s tests -v` -> `160/160` 通过
 - Azure DevOps 的 task -> branch -> PR 真实闭环已经跑通
 - 同父 run 的 PR feedback 恢复已经真实跑通
 - 同父 run 的 CI recovery 已完成真实端到端闭环：

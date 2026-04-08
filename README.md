@@ -44,7 +44,7 @@ ClawHarness is an autonomous task-to-PR execution harness for Azure DevOps and G
 ## Current Status
 
 - Latest local verification:
-  `python -m unittest discover -s tests -v` -> `158/158` passed
+  `python -m unittest discover -s tests -v` -> `160/160` passed
 - Azure DevOps task-to-branch-to-PR is live-validated
 - Same-parent PR feedback recovery is live-validated
 - Same-parent CI recovery is live-validated end to end:

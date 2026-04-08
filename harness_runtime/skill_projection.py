@@ -39,7 +39,7 @@ def project_openclaw_skills(
     if not isinstance(skills, list):
         raise ValueError("Canonical skill registry is missing skills[]")
 
-    projected_root = Path(target_root) if target_root is not None else root / "openclaw-plugin" / "skills"
+    projected_root = _projected_root(root, target_root)
     projected_root.mkdir(parents=True, exist_ok=True)
     _clear_directory(projected_root)
 
@@ -74,7 +74,7 @@ def verify_openclaw_skill_projection(
     target_root: str | Path | None = None,
 ) -> Path:
     root = _repo_root(repo_root)
-    projected_root = Path(target_root) if target_root is not None else root / "openclaw-plugin" / "skills"
+    projected_root = _projected_root(root, target_root)
     if not projected_root.exists():
         raise FileNotFoundError(f"Projected skill directory not found: {projected_root}")
 
@@ -119,6 +119,12 @@ def _collect_files(root: Path) -> set[Path]:
         for path in root.rglob("*")
         if path.is_file()
     }
+
+
+def _projected_root(root: Path, target_root: str | Path | None) -> Path:
+    if target_root is not None:
+        return Path(target_root)
+    return root / "openclaw-plugin" / "skills"
 
 
 def _repo_root(repo_root: str | Path | None) -> Path:
