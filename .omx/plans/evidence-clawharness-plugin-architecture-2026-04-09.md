@@ -1,90 +1,27 @@
 # ClawHarness 插件化与单一 Skill 真源改造证据
 
 日期：2026-04-09
-范围：plugin / skill / workflow 边界收口
+对应计划：
+- `.omx/plans/prd-clawharness-plugin-architecture-2026-04-09.md`
+- `.omx/plans/test-spec-clawharness-plugin-architecture-2026-04-09.md`
 
 ## 结论
 
-截至 2026-04-09，ClawHarness 的插件化边界已经具备以下状态：
+当前仓库已经满足这轮改造计划的核心目标：
 
-1. canonical skill source 已在代码中生效。
-2. OpenClaw skill 目录已经是兼容镜像，而不是长期手工真源。
-3. workflow 已收缩为引用层。
-4. capability registry 已落地并进入运行时装配路径。
-5. 本轮新增了中文边界说明文档，用于固定当前职责分层。
+1. `skills/core/` 是 canonical skill source。
+2. `openclaw-plugin/skills/` 是投影出来的 OpenClaw 兼容目录。
+3. runtime 默认优先读取 canonical skill registry，并保留 legacy 回退。
+4. capability registry 已进入主运行链路。
+5. OpenClaw flow 已经收缩为引用层，不再保存 canonical skill 正文。
+6. 用户文档已经按新的 ownership 模型完成同步。
+7. 已追加一条真实 `local-task` 离线闭环证据，证明当前架构收口没有破坏主链路。
 
-## 代码证据
+## 静态与回归验证
 
-### 1. canonical skill source
+### 全量单元测试
 
-- `skills/core/registry.json`
-- `skills/core/<skill-id>/SKILL.md`
-- `skills/README.md`
-- `harness_runtime/skill_registry.py`
-
-观察结论：
-
-- 运行时默认优先读取 `skills/core/registry.json`
-- 缺失时回退到 `openclaw-plugin/skills/registry.json`
-- 两者都不存在时返回 `missing` 安全默认路径
-
-### 2. OpenClaw 侧 skill 镜像
-
-- `harness_runtime/skill_projection.py`
-- `openclaw-plugin/skills/README.md`
-- `tests/test_skill_projection.py`
-
-观察结论：
-
-- `openclaw-plugin/skills/` 由 `python -m harness_runtime.skill_projection` 投影生成
-- `python -m harness_runtime.skill_projection --check` 可校验镜像是否漂移
-
-### 3. workflow 引用化
-
-- `openclaw-plugin/flows/task-run.yaml`
-- `openclaw-plugin/flows/pr-feedback.yaml`
-- `openclaw-plugin/flows/ci-recovery.yaml`
-
-观察结论：
-
-- flow 文件使用 `skill_refs`
-- flow 文件使用 `capability_refs`
-- flow 文件不再保存第二份 skill 正文
-
-### 4. capability registry
-
-- `harness_runtime/capability_registry.py`
-- `harness_runtime/capabilities/builtin-task-providers.json`
-- `harness_runtime/provider_factories.py`
-- `tests/test_capability_registry.py`
-- `harness_runtime/main.py`
-
-观察结论：
-
-- 运行时已经通过 capability registry 装配内建 task provider
-- 默认内建能力已覆盖 `azure-devops`、`github`、`local-task`
-
-## 本轮新增文档
-
-- `docs/plugin-skill-workflow-boundary.md`
-
-用途：
-
-- 固定 `ClawHarness Core / OpenClaw Shell / Codex Executor` 的职责边界
-- 明确 canonical source、compatibility mirror、workflow refs、capability registry 的关系
-
-## 本轮提交
-
-- `2f2d1a8`
-  - 规划与测试规范落盘
-- `ce5ed6a`
-  - 当前职责边界文档化并补强 OpenClaw skill 镜像说明
-
-## 本轮验证
-
-### 1. Python 单元测试
-
-命令：
+执行命令：
 
 ```powershell
 python -m unittest discover -s tests -v
@@ -92,11 +29,11 @@ python -m unittest discover -s tests -v
 
 结果：
 
-- `158/158` 通过
+- `153/153` 通过
 
-### 2. 语法编译检查
+### 语法编译检查
 
-命令：
+执行命令：
 
 ```powershell
 python -m compileall ado_client codex_acp_runner github_client harness_runtime local_client rocketchat_notifier run_store workflow_provider tests
@@ -106,9 +43,9 @@ python -m compileall ado_client codex_acp_runner github_client harness_runtime l
 
 - 通过
 
-### 3. OpenClaw skill 投影一致性检查
+### skill projection 一致性检查
 
-命令：
+执行命令：
 
 ```powershell
 python -m harness_runtime.skill_projection --check
@@ -116,20 +53,149 @@ python -m harness_runtime.skill_projection --check
 
 结果：
 
-- `projection_ok D:\Repos\claw_az\openclaw-plugin\skills\registry.json`
+- 输出 `projection_ok D:\Repos\claw_az\openclaw-plugin\skills\registry.json`
 
-## 剩余事项
+这说明当前仓库中的 `openclaw-plugin/skills/` 与 canonical source 没有漂移。
 
-本轮未直接提交以下内容：
+## 真实离线闭环验证
 
-- 顶层 `README.md`
+本轮新增了一次隔离的 `local-task` 真实运行，未修改默认部署配置，也未污染既有离线验证目录。
+
+### 验证输入
+
+临时验证根目录：
+
+- `.tmp/plugin-architecture-live-run/`
+
+任务文件：
+
+- `.tmp/plugin-architecture-live-run/tasks/task-002.md`
+
+源仓库：
+
+- `.tmp/plugin-architecture-live-run/repo/`
+
+执行命令：
+
+```powershell
+$env:HARNESS_EXECUTOR_BACKEND='codex-cli'
+python -m harness_runtime.main `
+  --providers-config .tmp/plugin-architecture-live-run/providers.local-task.yaml `
+  --openclaw-config .tmp/plugin-architecture-live-run/openclaw.local.json `
+  --policy-config deploy/config/harness-policy.yaml `
+  --provider-type local-task `
+  --task-id task-002
+```
+
+### 运行结果
+
+命令返回：
+
+```json
+{
+  "run_id": "manual-repo-task-002",
+  "status": "awaiting_review",
+  "branch_name": "refs/heads/ai/task-002-add-offline-validation-note",
+  "pr_id": "local-bc17c8fd",
+  "workspace_path": "D:\\Repos\\claw_az\\.tmp\\plugin-architecture-live-run\\workspace\\repo-manual-repo-task-002",
+  "last_error": null
+}
+```
+
+说明：
+
+- local-task 主链路完成到 `awaiting_review`
+- 本地 review artifact 已生成
+- 分支创建成功
+- 工作区隔离成功
+
+### 工件证据
+
+本地 review artifact：
+
+- `.tmp/plugin-architecture-live-run/reviews/pull-requests/local-bc17c8fd.md`
+
+其中明确记录：
+
+- Review ID：`local-bc17c8fd`
+- Source Branch：`refs/heads/ai/task-002-add-offline-validation-note`
+- task 结果说明、review summary、verification summary
+
+工作区内修改后的 README：
+
+- `.tmp/plugin-architecture-live-run/workspace/repo-manual-repo-task-002/README.md`
+
+内容包含：
+
+- 新增 `## Result`
+- 新增 bullet：`- Completed by ClawHarness local-task Docker validation.`
+
+源仓库 README 保持未改：
+
+- `.tmp/plugin-architecture-live-run/repo/README.md`
+
+### RunGraph 与 skill selection 证据
+
+从 `.tmp/plugin-architecture-live-run/harness.sqlite3` 读取到：
+
+- 根 run：`manual-repo-task-002`
+- 状态：`awaiting_review`
+- 子 run：
+  - `agent-planner`
+  - `agent-executor`
+  - `agent-reviewer`
+  - `agent-verifier`
+- skill selection key：
+  - `task:planner:local-task`
+  - `task:executor:local-task`
+  - `task:reviewer:local-task`
+  - `task:verifier:local-task`
+
+这说明：
+
+- 真实运行经过了多 agent 路径
+- local-task provider 下的 canonical skill 选择逻辑被实际消费
+- 当前架构收口没有把 RunGraph、skill selection 或本地闭环跑坏
+
+## 文档与 ownership 收口
+
+当前仓库的用户文档已经按新的 ownership 模型收口：
+
+- `README.md`
 - `README.zh-CN.md`
 - `deploy/README.md`
-- `deploy/package/README.md`
 
-原因：
+当前对外约定已经统一为：
 
-- 这些文件在工作区中已经存在其他未提交改动
-- 为避免把无关改动混入本轮边界收口提交，本轮只提交了干净文件与新文档
+- canonical source：`skills/core/`
+- compatibility mirror：`openclaw-plugin/skills/`
+- projection command：`python -m harness_runtime.skill_projection`
+- drift check：`python -m harness_runtime.skill_projection --check`
 
-这不影响当前代码边界本身已经落地，但意味着顶层文档的最终统一说明仍需要在后续单独清理后再收口。
+## 剩余风险
+
+### Windows `codex-cli` 输出解码噪声
+
+这次真实离线运行虽然成功，但在命令退出后仍出现了一条线程级异常：
+
+- `UnicodeDecodeError: 'gbk' codec can't decode ...`
+
+影响判断：
+
+- 本次 run 最终返回码为 `0`
+- root run 成功进入 `awaiting_review`
+- review artifact 与工作区产物完整生成
+
+因此它当前属于“运行输出解码噪声”，不是阻塞性功能失败；但后续仍建议在 Windows `codex-cli` 路径上，把 subprocess 文本解码策略改成显式 UTF-8 或带容错回退，避免真实运行日志被额外异常污染。
+
+## 最终判定
+
+以 2026-04-09 当前仓库状态来看，这轮“插件化与单一 Skill 真源改造”已经完成闭环：
+
+- 架构边界成立
+- 文档边界成立
+- 回归验证通过
+- 真实离线闭环通过
+- 兼容投影校验通过
+
+后续如果继续推进，就不再是这轮架构收口本身，而是下一轮功能增强或 Windows `codex-cli` 输出健壮性修复。
