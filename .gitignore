@@ -5,9 +5,7 @@ __pycache__/
 openclaw-plugin/node_modules/
 deploy/rocketchat-local/data/
 
-.omx/logs/
-.omx/tmp/
-.omx/state/
+.omx/
 
 .data/
 dist/
