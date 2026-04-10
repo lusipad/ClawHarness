@@ -133,7 +133,7 @@ python deploy/package/package_release_assets.py --output dist/github-actions --l
 - `clawharness-deploy-<label>.zip`
 - `SHA256SUMS-<label>.txt`
 - `artifact-manifest-<label>.json`
-- `clawharness-images-<label>.tar`
+- `clawharness-images-<label>.tar.gz`
   仅当传入 `--image-archive` 时生成
 
 仓库里的 [`.github/workflows/package-installers.yml`](../../.github/workflows/package-installers.yml) 已经直接复用了这条打包逻辑：

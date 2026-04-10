@@ -60,11 +60,12 @@ def package_release_assets(output_dir: Path, label: str, image_archive: Path | N
     files: list[Path] = [bundle_zip]
     copied_image_archive: Path | None = None
     if image_archive is not None:
-      if not image_archive.is_file():
-          raise FileNotFoundError(f"Offline image archive not found: {image_archive}")
-      copied_image_archive = archives_dir / f"clawharness-images-{label}.tar"
-      shutil.copy2(image_archive, copied_image_archive)
-      files.append(copied_image_archive)
+        if not image_archive.is_file():
+            raise FileNotFoundError(f"Offline image archive not found: {image_archive}")
+        suffix = "".join(image_archive.suffixes) or image_archive.suffix or ".tar"
+        copied_image_archive = archives_dir / f"clawharness-images-{label}{suffix}"
+        shutil.copy2(image_archive, copied_image_archive)
+        files.append(copied_image_archive)
 
     checksum_lines: list[str] = []
     manifest_files: list[dict[str, object]] = []

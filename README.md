@@ -233,7 +233,7 @@ The repository now includes [`.github/workflows/package-installers.yml`](.github
   `clawharness-deploy-<label>.zip`,
   `SHA256SUMS-<label>.txt`,
   `artifact-manifest-<label>.json`,
-  and, when requested, `clawharness-images-<label>.tar`.
+  and, when requested, `clawharness-images-<label>.tar.gz`.
 
 If you want to reproduce the same packaging flow locally:
 

@@ -68,10 +68,10 @@ jobs:
             -t clawharness/openclaw-bot-view:local \
             .
           docker save \
-            -o "dist/offline/clawharness-images-${PACKAGE_LABEL}.tar" \
             clawharness/openclaw-gateway:local \
             clawharness/harness-bridge:local \
-            clawharness/openclaw-bot-view:local
+            clawharness/openclaw-bot-view:local \
+            | gzip -1 > "dist/offline/clawharness-images-${PACKAGE_LABEL}.tar.gz"
 
       - name: Package installer artifacts
         shell: bash
@@ -81,7 +81,7 @@ jobs:
             --label "${PACKAGE_LABEL}"
             --force
           )
-          image_archive="dist/offline/clawharness-images-${PACKAGE_LABEL}.tar"
+          image_archive="dist/offline/clawharness-images-${PACKAGE_LABEL}.tar.gz"
           if [[ -f "${image_archive}" ]]; then
             args+=(--image-archive "${image_archive}")
           fi

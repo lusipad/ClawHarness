@@ -48,7 +48,7 @@ class ReleasePackageAssetTests(unittest.TestCase):
     def test_package_release_assets_copies_optional_offline_image_archive(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir) / "release"
-            offline_archive = Path(temp_dir) / "clawharness-images.tar"
+            offline_archive = Path(temp_dir) / "clawharness-images.tar.gz"
             offline_archive.write_bytes(b"offline-image-archive")
 
             result = package_release_assets.package_release_assets(
@@ -58,18 +58,18 @@ class ReleasePackageAssetTests(unittest.TestCase):
                 force=False,
             )
 
-            copied_archive = output_dir / "artifacts" / "clawharness-images-offline.tar"
+            copied_archive = output_dir / "artifacts" / "clawharness-images-offline.tar.gz"
             checksum_file = output_dir / "artifacts" / "SHA256SUMS-offline.txt"
 
             self.assertEqual(copied_archive, result["offline_image_archive"])
             self.assertTrue(copied_archive.is_file())
             self.assertEqual(b"offline-image-archive", copied_archive.read_bytes())
-            self.assertIn("clawharness-images-offline.tar", checksum_file.read_text(encoding="utf-8"))
+            self.assertIn("clawharness-images-offline.tar.gz", checksum_file.read_text(encoding="utf-8"))
 
     def test_cli_entrypoint_supports_script_execution(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir) / "release"
-            offline_archive = Path(temp_dir) / "clawharness-images.tar"
+            offline_archive = Path(temp_dir) / "clawharness-images.tar.gz"
             offline_archive.write_bytes(b"offline-image-archive")
 
             completed = subprocess.run(
@@ -93,7 +93,7 @@ class ReleasePackageAssetTests(unittest.TestCase):
             self.assertEqual(0, completed.returncode, msg=completed.stderr)
             self.assertIn("packaged release assets", completed.stdout)
             self.assertTrue((output_dir / "artifacts" / "clawharness-deploy-cli.zip").is_file())
-            self.assertTrue((output_dir / "artifacts" / "clawharness-images-cli.tar").is_file())
+            self.assertTrue((output_dir / "artifacts" / "clawharness-images-cli.tar.gz").is_file())
 
 
 if __name__ == "__main__":

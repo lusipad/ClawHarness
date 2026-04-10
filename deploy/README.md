@@ -427,8 +427,8 @@ artifact 内容包括：
 - `clawharness-deploy-<label>.zip`
 - `SHA256SUMS-<label>.txt`
 - `artifact-manifest-<label>.json`
-- `clawharness-images-<label>.tar`
-  只有手工触发并启用 `include_offline_images=true` 时才会附带
+- `clawharness-images-<label>.tar.gz`
+  在 `v*` tag 发布或手工触发并启用 `include_offline_images=true` 时附带
 
 如果你要在本地先验证这条打包链路，可执行：
 

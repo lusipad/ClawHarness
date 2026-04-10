@@ -232,7 +232,7 @@ docker save -o clawharness-images.tar \
   `clawharness-deploy-<label>.zip`、
   `SHA256SUMS-<label>.txt`、
   `artifact-manifest-<label>.json`，
-  如果启用了离线镜像，则还会包含 `clawharness-images-<label>.tar`。
+  如果启用了离线镜像，则还会包含 `clawharness-images-<label>.tar.gz`。
 
 如果你要在本地复现与 CI 相同的打包流程，可执行：
 
