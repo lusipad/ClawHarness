@@ -1,0 +1,11 @@
+{
+  "id": "clawharness-builtin-notifiers",
+  "version": "2026-04-09",
+  "capabilities": [
+    {
+      "type": "notifier",
+      "id": "rocketchat-webhook",
+      "factory": "harness_runtime.runtime_factories:create_rocketchat_notifier"
+    }
+  ]
+}

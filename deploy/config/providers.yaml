@@ -1,59 +1,49 @@
-# Draft MVP provider baseline.
-# This file captures the agreed P0 profile:
-# - Azure DevOps via ado-rest
-# - GitHub via github-rest after you switch `task_pr_ci` to the GitHub profile below
-# - Rocket.Chat via webhook notifications
-# - Codex via ACP
-# Validate exact runtime parsing rules against the installed OpenClaw version before production use.
+# Default V3 local-first baseline.
+# Use this file when you want the lightest core-only path:
+# - local-task as the default provider
+# - codex-cli as the default executor
+# - OpenClaw shell disabled by default
+#
+# For Azure DevOps or GitHub examples, see:
+# - deploy/config/providers.azure-devops.yaml
+# - deploy/config/providers.github.yaml
 
 providers:
   task_pr_ci:
-    family: azure-devops
-    mode: ado-rest
-    fallback_mode: ado-rest
-    base_url: ${ADO_BASE_URL}
-    project: ${ADO_PROJECT}
-    organization: null
-    auth:
-      type: pat
-      secret_env: ADO_PAT
-    events:
-      mode: webhook
-      webhook_secret_env: ADO_WEBHOOK_SECRET
-
-    # GitHub profile example:
-    # family: github
-    # mode: github-rest
-    # base_url: https://api.github.com
-    # auth:
-    #   type: token
-    #   secret_env: GITHUB_TOKEN
-    # events:
-    #   mode: webhook
-    #   webhook_secret_env: GITHUB_WEBHOOK_SECRET
+    default_provider: local-task
+    local_task:
+      family: local-task
+      mode: local-file
+      repository_path: ${LOCAL_REPO_PATH}
+      task_directory: ${LOCAL_TASKS_PATH}
+      review_directory: ${LOCAL_REVIEW_PATH}
+      base_branch: ${LOCAL_BASE_BRANCH}
+      push_enabled: ${LOCAL_PUSH_ENABLED}
 
   chat:
     family: rocketchat
-    mode: rocketchat-webhook
+    mode: disabled
     room: ai-dev
     webhook_url_env: RC_WEBHOOK_URL
     command_token_env: RC_COMMAND_TOKEN
 
   executor:
-    family: acp
-    mode: codex-acp
+    family: codex
+    mode: codex-cli
     harness: codex
-    backend: acpx
+    backend: codex-cli
     runtime:
-      mode: persistent
       timeout_seconds: 3600
 
 runtime:
+  shell:
+    enabled: false
   storage:
     kind: sqlite
     path: ~/.openclaw/harness/harness.db
   workspace_root: ~/.openclaw/workspace/harness
   branch_prefix: ai
+  owner: harness-bridge
   lock_ttl_seconds: 1800
   dedupe_ttl_seconds: 86400
   audit_retention_days: 30

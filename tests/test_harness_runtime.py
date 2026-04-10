@@ -8,6 +8,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
+import harness_runtime.main as harness_main
 from ado_client import AzureDevOpsRestClient
 from github_client import GitHubRestClient
 from harness_runtime import (
@@ -357,6 +358,7 @@ policy:
         self.assertEqual("hook-secret", self.config.openclaw_hooks.token)
         self.assertEqual("ingress-secret", self.config.ingress_token)
         self.assertIsNone(self.config.readonly_token)
+        self.assertIsNone(self.config.control_token)
 
     def test_load_harness_runtime_config_resolves_readonly_token(self) -> None:
         config = load_harness_runtime_config(
@@ -375,6 +377,25 @@ policy:
         )
 
         self.assertEqual("readonly-secret", config.readonly_token)
+        self.assertIsNone(config.control_token)
+
+    def test_load_harness_runtime_config_resolves_control_token(self) -> None:
+        config = load_harness_runtime_config(
+            providers_path=self.base / "providers.yaml",
+            policy_path=self.base / "harness-policy.yaml",
+            openclaw_path=self.base / "openclaw.json",
+            env={
+                "ADO_PAT": "ado-secret",
+                "ADO_WEBHOOK_SECRET": "ado-webhook",
+                "RC_WEBHOOK_URL": "https://chat.example/hooks/1/abc",
+                "OPENCLAW_GATEWAY_TOKEN": "gateway-secret",
+                "OPENCLAW_HOOKS_TOKEN": "hook-secret",
+                "HARNESS_INGRESS_TOKEN": "ingress-secret",
+                "HARNESS_CONTROL_TOKEN": "control-secret",
+            },
+        )
+
+        self.assertEqual("control-secret", config.control_token)
 
     def test_load_harness_runtime_config_expands_user_paths(self) -> None:
         providers_path = self.base / "providers-home.yaml"
@@ -540,6 +561,9 @@ runtime:
         self.assertEqual("now", config.openclaw_hooks.wake_mode)
         self.assertEqual("harness-bridge", config.owner)
 
+    def test_legacy_acpx_backend_maps_to_codex_acp_capability(self) -> None:
+        self.assertEqual("codex-acp", harness_main._resolve_executor_capability_id(self.config))
+
     def test_load_harness_runtime_config_supports_nested_provider_configs(self) -> None:
         providers_path = self.base / "providers-multi.yaml"
         providers_path.write_text(
@@ -609,6 +633,122 @@ runtime:
         self.assertEqual("https://api.github.com", config.github.base_url)
         self.assertEqual("github-token", config.github.token)
         self.assertEqual("github-webhook", config.github.webhook_secret)
+
+    def test_load_harness_runtime_config_supports_local_task_provider(self) -> None:
+        providers_path = self.base / "providers-local.yaml"
+        providers_path.write_text(
+            """
+providers:
+  task_pr_ci:
+    family: local-task
+    mode: local-file
+    repository_path: ${LOCAL_REPO_PATH}
+    task_directory: ${LOCAL_TASKS_PATH}
+    review_directory: ${LOCAL_REVIEW_PATH}
+    base_branch: ${LOCAL_BASE_BRANCH}
+    push_enabled: ${LOCAL_PUSH_ENABLED}
+  chat:
+    family: rocketchat
+    mode: rocketchat-webhook
+    webhook_url_env: RC_WEBHOOK_URL
+  executor:
+    family: acp
+    mode: codex-acp
+    harness: codex
+    backend: acpx
+    runtime:
+      timeout_seconds: 3600
+runtime:
+  storage:
+    kind: sqlite
+    path: DB_PATH
+  workspace_root: D:/Repos/workspaces
+  branch_prefix: ai
+""".replace("DB_PATH", str(self.base / "local.db").replace("\\", "/")),
+            encoding="utf-8",
+        )
+
+        config = load_harness_runtime_config(
+            providers_path=providers_path,
+            policy_path=self.base / "harness-policy.yaml",
+            openclaw_path=self.base / "openclaw.json",
+            env={
+                "LOCAL_REPO_PATH": str(self.base / "repo"),
+                "LOCAL_TASKS_PATH": str(self.base / "tasks"),
+                "LOCAL_REVIEW_PATH": str(self.base / "reviews"),
+                "LOCAL_BASE_BRANCH": "main",
+                "LOCAL_PUSH_ENABLED": "1",
+                "RC_WEBHOOK_URL": "https://chat.example/hooks/1/abc",
+                "OPENCLAW_GATEWAY_TOKEN": "gateway-secret",
+                "OPENCLAW_HOOKS_TOKEN": "hook-secret",
+                "HARNESS_INGRESS_TOKEN": "ingress-secret",
+            },
+        )
+
+        self.assertEqual("local-task", config.default_task_provider)
+        self.assertEqual("local-file", config.local_task.mode)
+        self.assertEqual(str(self.base / "repo"), config.local_task.repository_path)
+        self.assertEqual(str(self.base / "tasks"), config.local_task.task_directory)
+        self.assertEqual(str(self.base / "reviews"), config.local_task.review_directory)
+        self.assertEqual("main", config.local_task.base_branch)
+        self.assertTrue(config.local_task.push_enabled)
+
+    def test_load_harness_runtime_config_allows_core_only_mode_without_openclaw_file(self) -> None:
+        providers_path = self.base / "providers-core-only.yaml"
+        providers_path.write_text(
+            """
+providers:
+  task_pr_ci:
+    default_provider: local-task
+    local_task:
+      family: local-task
+      mode: local-file
+      repository_path: ${LOCAL_REPO_PATH}
+      task_directory: ${LOCAL_TASKS_PATH}
+      review_directory: ${LOCAL_REVIEW_PATH}
+      push_enabled: false
+  chat:
+    family: rocketchat
+    mode: disabled
+    webhook_url_env: RC_WEBHOOK_URL
+  executor:
+    family: codex
+    mode: codex-cli
+    harness: codex
+    backend: codex-cli
+    runtime:
+      timeout_seconds: 3600
+runtime:
+  shell:
+    enabled: false
+  storage:
+    kind: sqlite
+    path: DB_PATH
+  workspace_root: D:/Repos/workspaces
+  branch_prefix: ai
+  owner: harness-core
+""".replace("DB_PATH", str(self.base / "core-only.db").replace("\\", "/")),
+            encoding="utf-8",
+        )
+
+        config = load_harness_runtime_config(
+            providers_path=providers_path,
+            policy_path=self.base / "harness-policy.yaml",
+            openclaw_path=self.base / "missing-openclaw.json",
+            env={
+                "LOCAL_REPO_PATH": str(self.base / "repo"),
+                "LOCAL_TASKS_PATH": str(self.base / "tasks"),
+                "LOCAL_REVIEW_PATH": str(self.base / "reviews"),
+                "HARNESS_INGRESS_TOKEN": "ingress-secret",
+            },
+        )
+
+        self.assertFalse(config.shell_enabled)
+        self.assertIsNone(config.openclaw_hooks)
+        self.assertIsNone(config.openclaw_gateway_token)
+        self.assertEqual("ingress-secret", config.ingress_token)
+        self.assertEqual("harness-core", config.owner)
+        self.assertEqual("local-task", config.default_task_provider)
 
     def test_handle_chat_command_returns_status_by_run_id_and_links_conversation(self) -> None:
         run = self.store.create_run(
@@ -741,6 +881,72 @@ runtime:
         root_audit = [entry["event_type"] for entry in self.store.list_audit(root.run_id)]
         self.assertIn("chat_command_applied", child_audit)
         self.assertIn("chat_command_applied", root_audit)
+
+    def test_handle_chat_command_supports_bot_view_payload_shape(self) -> None:
+        chat_bridge = self.make_chat_control_bridge()
+        run = self.store.create_run(
+            TaskRun(
+                run_id="run-bot-view",
+                provider_type="azure-devops",
+                task_id="9021",
+                task_key="AB#9021",
+                repo_id="repo-1",
+                session_id="session-bot-view",
+                executor_type="codex-acp",
+                status="awaiting_review",
+            )
+        )
+
+        paused = chat_bridge.handle_chat_command(
+            provider_type="bot-view",
+            payload={
+                "command": "pause",
+                "run_id": run.run_id,
+                "reason": "bot-view operator pause",
+                "user_label": "bot-view",
+            },
+        )
+        self.assertTrue(paused.ok)
+        self.assertEqual("awaiting_human", self.store.get_run(run.run_id).status)
+
+        resumed = chat_bridge.handle_chat_command(
+            provider_type="bot-view",
+            payload={
+                "command": "resume",
+                "run_id": run.run_id,
+                "user_label": "bot-view",
+            },
+        )
+        self.assertTrue(resumed.ok)
+        self.assertEqual("awaiting_review", self.store.get_run(run.run_id).status)
+
+    def test_handle_chat_command_supports_weixin_payload_shape(self) -> None:
+        run = self.store.create_run(
+            TaskRun(
+                run_id="run-weixin-status",
+                provider_type="azure-devops",
+                task_id="9051",
+                task_key="AB#9051",
+                repo_id="repo-1",
+                session_id="session-weixin-status",
+                executor_type="codex-acp",
+                status="awaiting_review",
+            )
+        )
+
+        result = self.bridge.handle_chat_command(
+            provider_type="weixin",
+            payload={
+                "command": "status",
+                "task_key": run.task_key,
+                "conversation_id": "wx-room-1",
+                "user_id": "wx-operator",
+            },
+        )
+
+        self.assertTrue(result.ok)
+        self.assertIn("AB#9051 当前状态：awaiting_review", result.text)
+        self.assertEqual(run.run_id, self.store.get_thread_link("wx-room-1")["run_id"])
 
     def test_handle_chat_command_add_context_records_artifacts_and_attachments(self) -> None:
         root = self.store.create_run(
@@ -1039,6 +1245,49 @@ runtime:
         audit_events = [entry["event_type"] for entry in self.store.list_audit("run-async-1")]
         self.assertIn("task_run_queued", audit_events)
         self.assertEqual([], self.openclaw_transport.calls)
+        notify_payload = json.loads(self.chat_transport.calls[0]["body"].decode("utf-8"))
+        self.assertEqual("Task AB#124 claimed and queued for ClawHarness orchestration", notify_payload["text"])
+
+    def test_handle_task_event_in_core_only_mode_uses_fallback_session_key(self) -> None:
+        task_orchestrator = RecordingTaskOrchestrator()
+        core_only_config = replace(
+            self.config,
+            openclaw_hooks=None,
+            openclaw_gateway_token=None,
+            shell_enabled=False,
+        )
+        bridge = HarnessBridge(
+            config=core_only_config,
+            store=self.store,
+            ado_client=self.ado_client,
+            github_client=self.github_client,
+            openclaw_client=None,
+            notifier=self.notifier,
+            task_orchestrator=task_orchestrator,
+            run_id_factory=lambda: "run-core-only-task",
+        )
+
+        result = bridge.handle_ado_event(
+            event_type="task.created",
+            source_id="evt-core-only-1",
+            payload={
+                "resource": {
+                    "id": 123,
+                    "fields": {"System.TeamProject": "AB"},
+                    "repository": {"id": "repo-1"},
+                    "revisedBy": {"id": "user-1", "displayName": "Alice"},
+                }
+            },
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual("task_dispatched", result.action)
+        self.assertTrue(task_orchestrator.event.wait(1.0))
+        run = self.store.get_run("run-core-only-task")
+        self.assertIsNotNone(run)
+        self.assertEqual("core:harness-bridge:task:AB-123", run.session_id)
+        notify_payload = json.loads(self.chat_transport.calls[0]["body"].decode("utf-8"))
+        self.assertEqual("Task AB#123 claimed and queued for ClawHarness orchestration", notify_payload["text"])
 
     def test_github_issue_event_queues_background_orchestration(self) -> None:
         task_orchestrator = RecordingTaskOrchestrator()
@@ -1326,6 +1575,53 @@ runtime:
         audit_events = [entry["event_type"] for entry in self.store.list_audit("run-pr-required")]
         self.assertIn("pr_feedback_rejected", audit_events)
 
+    def test_ado_pr_merged_event_completes_existing_run_without_task_orchestrator(self) -> None:
+        self.store.create_run(
+            TaskRun(
+                run_id="run-pr-merged",
+                provider_type="azure-devops",
+                task_id="123",
+                task_key="AB#123",
+                repo_id="repo-1",
+                pr_id="42",
+                session_id="hook:harness:task:AB-123",
+                executor_type="codex-acp",
+                status="awaiting_review",
+            )
+        )
+        self.ado_transport.responses.clear()
+        self.ado_transport.queue_json({"id": 123, "fields": {"System.State": "Done"}})
+        self.ado_transport.queue_json({"id": 1, "text": "done"})
+
+        result = self.bridge.handle_ado_event(
+            event_type="git.pullrequest.updated",
+            source_id="evt-pr-merged-1",
+            payload={
+                "resource": {
+                    "pullRequestId": 42,
+                    "status": "completed",
+                    "mergeStatus": "succeeded",
+                    "sourceRefName": "refs/heads/ai/task-1",
+                    "targetRefName": "refs/heads/main",
+                    "lastMergeCommit": {"commitId": "abc123"},
+                    "repository": {"id": "repo-1"},
+                }
+            },
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual("pr_completed", result.action)
+        run = self.store.get_run("run-pr-merged")
+        self.assertEqual("completed", run.status)
+        self.assertEqual([], self.openclaw_transport.calls)
+        audit_events = [entry["event_type"] for entry in self.store.list_audit("run-pr-merged")]
+        self.assertIn("pr_completed", audit_events)
+        self.assertIn("task_completion_synced", audit_events)
+        self.assertEqual("PATCH", self.ado_transport.calls[0]["method"])
+        self.assertEqual("POST", self.ado_transport.calls[1]["method"])
+        notify_payload = json.loads(self.chat_transport.calls[0]["body"].decode("utf-8"))
+        self.assertIn("PR 42 merged for AB#123", notify_payload["text"])
+
     def test_pr_event_rejects_when_follow_up_is_already_active(self) -> None:
         task_orchestrator = RecordingTaskOrchestrator()
         bridge = HarnessBridge(
@@ -1506,6 +1802,110 @@ runtime:
         self.wait_for_follow_up_lock_release("followup:run-pr-parent:pr-feedback", "run-pr-parent")
         self.assertFalse(second.accepted)
         self.assertEqual("duplicate_event", second.reason)
+
+    def test_github_pr_merged_event_completes_existing_run(self) -> None:
+        self.store.create_run(
+            TaskRun(
+                run_id="run-gh-pr-merged",
+                provider_type="github",
+                task_id="456",
+                task_key="lusipad/ClawHarness#456",
+                repo_id="lusipad/ClawHarness",
+                pr_id="42",
+                session_id="hook:harness:task:gh-456",
+                executor_type="codex-acp",
+                status="awaiting_review",
+            )
+        )
+        self.github_transport.responses.clear()
+        self.github_transport.queue_json({"number": 456, "state": "closed"})
+        self.github_transport.queue_json({"id": 70, "body": "done"})
+
+        result = self.bridge.handle_github_event(
+            event_type="pull_request",
+            source_id="gh-pr-merged-1",
+            payload={
+                "action": "closed",
+                "number": 42,
+                "pull_request": {
+                    "number": 42,
+                    "merged": True,
+                    "state": "closed",
+                    "merge_commit_sha": "def456",
+                    "head": {"ref": "ai/task-1"},
+                    "base": {"ref": "main"},
+                    "closed_at": "2026-04-08T00:00:00Z",
+                },
+                "repository": {"full_name": "lusipad/ClawHarness"},
+                "sender": {"login": "octocat", "id": 7},
+            },
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual("pr_completed", result.action)
+        run = self.store.get_run("run-gh-pr-merged")
+        self.assertEqual("completed", run.status)
+        audit_events = [entry["event_type"] for entry in self.store.list_audit("run-gh-pr-merged")]
+        self.assertIn("pr_completed", audit_events)
+        self.assertIn("task_completion_synced", audit_events)
+        self.assertEqual("PATCH", self.github_transport.calls[0]["method"])
+        self.assertEqual("POST", self.github_transport.calls[1]["method"])
+        notify_payload = json.loads(self.chat_transport.calls[0]["body"].decode("utf-8"))
+        self.assertIn("PR 42 merged for lusipad/ClawHarness#456", notify_payload["text"])
+
+    def test_pr_merged_completion_sync_failure_does_not_block_run_completion(self) -> None:
+        class FailingAzureClient(AzureDevOpsRestClient):
+            def complete_task(self, work_item_id: int | str, *, repo_id: str | None = None, comment: str | None = None):
+                del work_item_id, repo_id, comment
+                raise RuntimeError("sync failed")
+
+        failing_ado_client = FailingAzureClient(
+            base_url=self.config.azure_devops.base_url,
+            project=self.config.azure_devops.project,
+            pat=self.config.azure_devops.pat,
+            transport=self.ado_transport,
+        )
+        bridge = HarnessBridge(
+            config=self.config,
+            store=self.store,
+            ado_client=failing_ado_client,
+            github_client=self.github_client,
+            openclaw_client=self.openclaw_client,
+            notifier=self.notifier,
+            run_id_factory=lambda: "run-1",
+        )
+        self.store.create_run(
+            TaskRun(
+                run_id="run-pr-merged-sync-fail",
+                provider_type="azure-devops",
+                task_id="123",
+                task_key="AB#123",
+                repo_id="repo-1",
+                pr_id="42",
+                session_id="hook:harness:task:AB-123",
+                executor_type="codex-acp",
+                status="awaiting_review",
+            )
+        )
+
+        result = bridge.handle_ado_event(
+            event_type="git.pullrequest.updated",
+            source_id="evt-pr-merged-sync-fail",
+            payload={
+                "resource": {
+                    "pullRequestId": 42,
+                    "status": "completed",
+                    "mergeStatus": "succeeded",
+                    "repository": {"id": "repo-1"},
+                }
+            },
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual("completed", self.store.get_run("run-pr-merged-sync-fail").status)
+        audit_events = [entry["event_type"] for entry in self.store.list_audit("run-pr-merged-sync-fail")]
+        self.assertIn("pr_completed", audit_events)
+        self.assertIn("task_completion_sync_failed", audit_events)
 
     def test_ci_event_queues_existing_run_into_runtime_orchestrator_and_notifies(self) -> None:
         task_orchestrator = RecordingTaskOrchestrator()

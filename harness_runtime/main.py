@@ -5,14 +5,12 @@ import json
 import os
 from pathlib import Path
 
-from codex_acp_runner import CodexAcpRunner, CodexCliRunner
-from rocketchat_notifier import RocketChatNotifier
 from run_store import RunStore
 from workflow_provider import WorkflowProviderClient
 
 from .bridge import HarnessBridge
-from .capability_registry import load_default_capability_registry
-from .config import load_harness_runtime_config
+from .capability_registry import RuntimeCapabilityContext, load_default_capability_registry
+from .config import HarnessRuntimeConfig, load_harness_runtime_config
 from .image_analyzer import OpenAIImageAnalyzer
 from .maintenance import RunMaintenanceService
 from .openclaw_client import OpenClawWebhookClient
@@ -49,26 +47,47 @@ def main() -> int:
     store = RunStore(config.runtime.sqlite_path)
     store.initialize()
 
+    if args.run_maintenance:
+        maintenance = RunMaintenanceService(config=config, store=store)
+        result = maintenance.cleanup_terminal_runs(
+            retention_days=args.cleanup_retention_days,
+            limit=args.cleanup_limit,
+        )
+        print(json.dumps(result.to_payload(), ensure_ascii=False))
+        return 0
+
+    openclaw_client = None
+    gateway_tool_client = None
+    if config.openclaw_hooks is not None:
+        openclaw_client = OpenClawWebhookClient(
+            base_url=config.openclaw_hooks.base_url,
+            token=config.openclaw_hooks.token,
+            path=config.openclaw_hooks.path,
+        )
+        gateway_tool_client = OpenClawWebhookClient(
+            base_url=config.openclaw_hooks.base_url,
+            token=config.openclaw_gateway_token or config.openclaw_hooks.token,
+            path=config.openclaw_hooks.path,
+        )
+
     capability_registry = load_default_capability_registry()
-    provider_clients: dict[str, WorkflowProviderClient] = capability_registry.instantiate_task_providers(config)
+    capability_context = RuntimeCapabilityContext(
+        config=config,
+        openclaw_client=openclaw_client,
+        gateway_tool_client=gateway_tool_client,
+    )
+    provider_instances = capability_registry.instantiate_capabilities("task-provider", capability_context)
+    provider_clients: dict[str, WorkflowProviderClient] = {
+        key: value
+        for key, value in provider_instances.items()
+        if isinstance(value, WorkflowProviderClient)
+    }
     ado_client = provider_clients.get("azure-devops")
     github_client = provider_clients.get("github")
-    openclaw_client = OpenClawWebhookClient(
-        base_url=config.openclaw_hooks.base_url,
-        token=config.openclaw_hooks.token,
-        path=config.openclaw_hooks.path,
+    notifier = _first_capability(
+        capability_registry.instantiate_capabilities("notifier", capability_context),
+        preferred_ids=("rocketchat-webhook",),
     )
-    gateway_tool_client = OpenClawWebhookClient(
-        base_url=config.openclaw_hooks.base_url,
-        token=config.openclaw_gateway_token or config.openclaw_hooks.token,
-        path=config.openclaw_hooks.path,
-    )
-    notifier = None
-    if config.rocketchat.webhook_url:
-        notifier = RocketChatNotifier(
-            webhook_url=config.rocketchat.webhook_url,
-            default_channel=config.rocketchat.channel,
-        )
     image_analyzer = None
     openai_api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if openai_api_key:
@@ -84,17 +103,9 @@ def main() -> int:
             model=image_model,
         )
 
-    executor_backend = os.environ.get("HARNESS_EXECUTOR_BACKEND", "").strip().lower()
-    if executor_backend == "codex-cli":
-        executor_runner = CodexCliRunner()
-    else:
-        executor_runner = CodexAcpRunner(
-            lambda payload: gateway_tool_client.invoke_tool(
-                tool="sessions_spawn",
-                action="session_spawn",
-                args=payload,
-            )
-        )
+    executor_instances = capability_registry.instantiate_capabilities("executor", capability_context)
+    executor_id = _resolve_executor_capability_id(config)
+    executor_runner = _pick_required_capability(executor_instances, executor_id)
 
     if args.task_id:
         effective_provider_type = args.provider_type or config.default_task_provider
@@ -133,15 +144,6 @@ def main() -> int:
         )
         return 0 if final_run.status == "awaiting_review" else 1
 
-    if args.run_maintenance:
-        maintenance = RunMaintenanceService(config=config, store=store)
-        result = maintenance.cleanup_terminal_runs(
-            retention_days=args.cleanup_retention_days,
-            limit=args.cleanup_limit,
-        )
-        print(json.dumps(result.to_payload(), ensure_ascii=False))
-        return 0
-
     bridge = HarnessBridge(
         config=config,
         store=store,
@@ -171,6 +173,50 @@ def main() -> int:
         github_webhook_secret=config.github.webhook_secret if config.github is not None else None,
     )
     return 0
+
+
+def _resolve_executor_capability_id(config: HarnessRuntimeConfig) -> str:
+    env_backend = _normalize_executor_capability_id(os.environ.get("HARNESS_EXECUTOR_BACKEND", ""))
+    if env_backend:
+        return env_backend
+
+    normalized_backend = _normalize_executor_capability_id(config.executor.backend)
+    if normalized_backend:
+        return normalized_backend
+
+    normalized_mode = _normalize_executor_capability_id(config.executor.mode)
+    if normalized_mode:
+        return normalized_mode
+    return "codex-acp"
+
+
+def _first_capability(instances: dict[str, object], *, preferred_ids: tuple[str, ...]) -> object | None:
+    for capability_id in preferred_ids:
+        if capability_id in instances:
+            return instances[capability_id]
+    return next(iter(instances.values()), None)
+
+
+def _pick_required_capability(instances: dict[str, object], capability_id: str) -> object:
+    selected = instances.get(capability_id)
+    if selected is not None:
+        return selected
+    available = ", ".join(sorted(instances)) or "none"
+    raise RuntimeError(f"Required capability is unavailable: {capability_id}; available: {available}")
+
+
+def _normalize_executor_capability_id(raw_value: str) -> str:
+    normalized = raw_value.strip().lower()
+    aliases = {
+        "": "",
+        "cli": "codex-cli",
+        "codex-cli": "codex-cli",
+        "acp": "codex-acp",
+        "acpx": "codex-acp",
+        "gateway": "codex-acp",
+        "codex-acp": "codex-acp",
+    }
+    return aliases.get(normalized, normalized)
 
 
 if __name__ == "__main__":

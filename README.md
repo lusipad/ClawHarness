@@ -2,19 +2,20 @@
 
 English | [简体中文](README.zh-CN.md)
 
-ClawHarness is an autonomous task-to-PR execution harness for Azure DevOps and GitHub repositories. It connects provider task sources, OpenClaw execution, local repository verification, branch and PR automation, and optional Rocket.Chat lifecycle notifications into one repeatable delivery loop.
+ClawHarness is a local-first autonomous task-to-PR execution harness. It can run as a lightweight core against local repositories and local task files, then layer Azure DevOps, GitHub, OpenClaw Shell, chat, and bot-view on top when you need them.
 
 ## What It Does
 
 - Uses a SQLite-backed runtime store for task claiming, deduplication, locking, and audit records
 - Prepares an isolated workspace for each task run and creates a task branch
-- Calls Codex through OpenClaw or the local Codex CLI backend to implement changes
+- Calls Codex through the local Codex CLI by default, with optional OpenClaw Shell integration
 - Runs local checks before commit and push
 - Opens PRs automatically and keeps an audit trail for every run
 - Supports webhook-driven continuation for PR feedback and CI failure recovery
 - Supports provider-neutral routing across Azure DevOps and GitHub
 - Supports an offline `local-task` mode for local repositories, local task files, and local review artifacts
 - Ships exportable deployment bundles with `load-images` and `up-offline` scripts for air-gapped environments
+- Includes a GitHub Actions packaging workflow that publishes installer artifacts and can optionally attach an offline image archive
 - Ships deployment assets for Windows, Linux systemd, and Docker
 
 ## Repository Layout
@@ -34,8 +35,14 @@ ClawHarness is an autonomous task-to-PR execution harness for Azure DevOps and G
 
 ## Documentation Map
 
+- `docs/system-architecture.md`: V3 system architecture overview, runtime layering, and deployment topology
 - `deploy/README.md`: deployment options, configuration, and operations notes
+- `docs/plugin-architecture.md`: plugin, skill, workflow, and runtime boundary summary
+- `docs/plugin-boundary.md`: ownership and maintenance boundary rules
+- `docs/plugin-skill-workflow-boundary.md`: detailed skill/workflow/capability boundary notes
 - `skills/README.md`: canonical skill ownership and projection notes
+- `.omx/plans/prd-clawharness-v3-2026-04-09.md`: V3 local-first / pluginized / lightweight product definition
+- `.omx/plans/test-spec-clawharness-v3-2026-04-09.md`: V3 acceptance criteria and verification gates
 - `.omx/plans/prd-clawharness-v2-2026-04-05.md`: V2 product definition and scope
 - `.omx/plans/test-spec-clawharness-v2-2026-04-05.md`: V2 acceptance criteria and validation gates
 - `.omx/plans/evidence-clawharness-v2-2026-04-06.md`: latest live-validation evidence snapshot
@@ -44,7 +51,10 @@ ClawHarness is an autonomous task-to-PR execution harness for Azure DevOps and G
 ## Current Status
 
 - Latest local verification:
-  `python -m unittest discover -s tests -v` -> `160/160` passed
+  `python -m unittest discover -s tests -v` -> `175/175` passed
+- Latest structural verification:
+  `python -m compileall ado_client codex_acp_runner github_client harness_runtime local_client rocketchat_notifier run_store workflow_provider tests deploy/package deploy/windows` -> passed
+- V3 local-first / pluginized / optional-shell baseline is complete and architect-approved
 - Azure DevOps task-to-branch-to-PR is live-validated
 - Same-parent PR feedback recovery is live-validated
 - Same-parent CI recovery is live-validated end to end:
@@ -69,13 +79,14 @@ ClawHarness is an autonomous task-to-PR execution harness for Azure DevOps and G
 
 ## Recommended Today
 
-- Use Docker as the default deployment path
-- Use Azure DevOps if you want the fully live-validated provider path today
-- Turn on the optional `bot-view` profile if you want a browser dashboard for OpenClaw and ClawHarness runtime status
-- If you enable interactive `bot-view` controls, set `HARNESS_CONTROL_TOKEN`; set `HARNESS_API_TOKEN` or `HARNESS_READONLY_TOKEN` only if you want a stricter read/write split
-- Treat the Windows GitHub issue-to-PR stdin rerun path as live-validated, but keep GitHub PR feedback and checks recovery scoped as pending broader webhook validation
+- Use the Docker core-only stack as the default deployment path
+- Keep `HARNESS_PROVIDER_PROFILE=local-task` unless you explicitly want Azure DevOps or GitHub
+- Turn on `--profile shell` only if you need OpenClaw UI, chat hosting, or bot-view
+- Turn on `--profile shell --profile bot-view` if you want the dashboard sidecar
+- If you enable interactive bot-view controls, set `HARNESS_CONTROL_TOKEN`; set `HARNESS_API_TOKEN` or `HARNESS_READONLY_TOKEN` only if you want a stricter read/write split
+- Treat Azure DevOps as the most broadly live-validated remote provider path today
 
-## Current V2 Delivery
+## Current Delivery
 
 - The bridge now exposes read-only runtime APIs for run summaries, run lists, run details, audit timelines, and run graphs
 - The bridge now also exposes a controlled `POST /api/runs/<run_id>/command` surface for audited `pause`, `resume`, `add-context`, and `escalate` actions
@@ -100,32 +111,74 @@ ClawHarness is an autonomous task-to-PR execution harness for Azure DevOps and G
 
 ## Fastest Start
 
+On Windows, the shortest path is:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/windows/bootstrap.ps1 -OpenAiApiKey <your-key>
+```
+
+If you prefer the simplified interactive installer, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/windows/bootstrap.ps1 -Interactive
+```
+
+Running `deploy/windows/bootstrap.ps1` in an interactive PowerShell session without arguments now also opens the quick wizard automatically.
+The wizard now shows an install summary before applying changes and runs a final install check automatically when bootstrap finishes.
+
+If you need the full advanced wizard with native-install and extra directory options, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/windows/bootstrap.ps1 -Interactive -Advanced
+```
+
+The unified installer also supports:
+`-InstallMode docker`, `-InstallMode native-core`, and `-InstallMode native-openclaw`.
+If Docker Desktop is not installed yet, add `-InstallDocker`.
+If you only want to prepare `.env`, data directories, and tokens without starting containers yet, add `-SkipStart`.
+If you want a seeded local task file for a first offline run, add `-CreateSampleTask`.
+After install or configuration, you can verify the current mode with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/windows/check-install.ps1 -InstallMode docker
+```
+
+Switch `docker` to `native-core` or `native-openclaw` if you deployed one of those native modes.
+The default Docker packaging is currently single-stack-per-host because the compose file uses fixed container names.
+
 1. Copy `deploy/docker/.env.example` to `deploy/docker/.env`
-2. Fill in at least:
-   `ADO_BASE_URL`, `ADO_PROJECT`, `ADO_PAT`, `OPENAI_API_KEY`, `OPENCLAW_GATEWAY_TOKEN`, `OPENCLAW_HOOKS_TOKEN`, `HARNESS_INGRESS_TOKEN`, and `CODEX_MODEL`
-3. Start the stack:
+2. Leave `HARNESS_PROVIDER_PROFILE=local-task`
+3. Fill in at least:
+   `OPENAI_API_KEY`, `LOCAL_REPO_PATH`, `LOCAL_TASKS_PATH`, and `LOCAL_REVIEW_PATH`
+4. Start the core-only stack:
 
 ```sh
 docker compose --env-file deploy/docker/.env -f deploy/docker/compose.yml up --build -d
 ```
 
-4. Optionally start the dashboard sidecar:
+5. If you want OpenClaw Shell as an optional UI/chat layer:
 
 ```sh
-docker compose --profile bot-view --env-file deploy/docker/.env -f deploy/docker/compose.yml up --build -d
+docker compose --profile shell --env-file deploy/docker/.env -f deploy/docker/compose.yml up --build -d
+```
+
+6. If you also want the dashboard sidecar:
+
+```sh
+docker compose --profile shell --profile bot-view --env-file deploy/docker/.env -f deploy/docker/compose.yml up --build -d
 ```
 
 If you want the dashboard to be interactive, also set `HARNESS_CONTROL_TOKEN`.
 If you only want read-only dashboard access, set `HARNESS_API_TOKEN` or `HARNESS_READONLY_TOKEN`.
 When only `HARNESS_CONTROL_TOKEN` is configured, the sidecar read proxy now falls back to that token automatically.
 
-5. Read the operational details in `deploy/README.md`
+7. Read the operational details in `deploy/README.md`
 
 ## Offline Mode
 
-For air-gapped or lab environments, ClawHarness now supports a provider-local workflow:
+For air-gapped or lab environments, ClawHarness now defaults to the provider-local workflow:
 
-- Switch `deploy/config/providers.yaml` to the `local-task` example
+- Keep `deploy/config/providers.yaml` as-is
 - Set `LOCAL_REPO_PATH`, `LOCAL_TASKS_PATH`, and `LOCAL_REVIEW_PATH`
 - Trigger a run with a local task file instead of Azure DevOps or GitHub
 
@@ -157,12 +210,45 @@ docker save -o clawharness-images.tar \
 
 3. Copy the bundle and `clawharness-images.tar` to the target machine, then run `load-images` followed by `up-offline`.
 
+On Windows deployment bundles, you can also run:
+
+```powershell
+./bootstrap.ps1 -OpenAiApiKey <your-key>
+```
+
+Then verify the copied bundle with:
+
+```powershell
+./check-install.ps1 -InstallMode docker
+```
+
+## GitHub Actions Packaging
+
+The repository now includes [`.github/workflows/package-installers.yml`](.github/workflows/package-installers.yml) for CI-produced installer artifacts.
+
+- Pushes to `main` and tags matching `v*` generate the online installer bundle artifact.
+- Tags matching `v*` also build the offline Docker image archive automatically and publish the packaged files to the GitHub Release for that tag.
+- Manual `workflow_dispatch` runs can set `include_offline_images=true` to also build and attach the offline Docker image archive.
+- The packaging step emits:
+  `clawharness-deploy-<label>.zip`,
+  `SHA256SUMS-<label>.txt`,
+  `artifact-manifest-<label>.json`,
+  and, when requested, `clawharness-images-<label>.tar`.
+
+If you want to reproduce the same packaging flow locally:
+
+```sh
+python deploy/package/package_release_assets.py --output dist/github-actions --label local --force
+python deploy/package/package_release_assets.py --output dist/github-actions --label local --image-archive clawharness-images.tar --force
+```
+
 ## Quick Start
 
 1. Configure the required environment variables for your task provider.
-   For Azure DevOps, set `ADO_BASE_URL`, `ADO_PROJECT`, and `ADO_PAT`.
-   For GitHub, switch `deploy/config/providers.yaml` to the GitHub profile and set `GITHUB_TOKEN`.
-   In both cases, set `OPENCLAW_HOOKS_TOKEN` and `OPENCLAW_GATEWAY_TOKEN`.
+   For local-first, keep the default `deploy/config/providers.yaml`.
+   For Azure DevOps, use `deploy/config/providers.azure-devops.yaml` or set `HARNESS_PROVIDER_PROFILE=azure-devops`.
+   For GitHub, use `deploy/config/providers.github.yaml` or set `HARNESS_PROVIDER_PROFILE=github`.
+   Only shell-enabled deployments need `OPENCLAW_HOOKS_TOKEN` and `OPENCLAW_GATEWAY_TOKEN`.
 2. Review deployment options in `deploy/README.md`.
 3. Run the Windows installer scripts or use the Docker/systemd assets for your target environment.
 4. Run the automated checks:
@@ -175,7 +261,7 @@ python -m compileall ado_client codex_acp_runner github_client harness_runtime l
 5. Trigger a manual task run:
 
 ```sh
-python -m harness_runtime.main --task-id <task-id> --repo-id <repo-id> [--provider-type github]
+python -m harness_runtime.main --provider-type local-task --task-id <task-id>
 ```
 
 ## Validation Scope

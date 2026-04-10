@@ -186,6 +186,22 @@ class HarnessServerTests(unittest.TestCase):
             extra_httpd.server_close()
             thread.join(timeout=5)
 
+    def test_api_can_use_control_token_for_read_access(self) -> None:
+        handler = create_handler(DummyBridge(self.store), ingress_token="ingress-secret", control_token="control-secret")
+        extra_httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=extra_httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            request = Request(f"http://127.0.0.1:{extra_httpd.server_address[1]}/api/runs")
+            request.add_header("Authorization", "Bearer control-secret")
+            with urlopen(request, timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            self.assertEqual(2, payload["count"])
+        finally:
+            extra_httpd.shutdown()
+            extra_httpd.server_close()
+            thread.join(timeout=5)
+
     def test_api_runs_returns_summary_and_runs(self) -> None:
         status, payload = self._get_json("/api/runs?limit=1", token="ingress-secret")
 
@@ -279,6 +295,90 @@ class HarnessServerTests(unittest.TestCase):
             self.assertEqual(401, ctx.exception.code)
             ctx.exception.close()
             self.assertEqual([], bridge.chat_calls)
+        finally:
+            extra_httpd.shutdown()
+            extra_httpd.server_close()
+            thread.join(timeout=5)
+
+    def test_weixin_chat_webhook_accepts_json_payload(self) -> None:
+        status, payload = self._post_json(
+            "/webhooks/chat/weixin",
+            body=json.dumps(
+                {
+                    "token": "ingress-secret",
+                    "command": "status",
+                    "task_key": "AB#101",
+                    "conversation_id": "wx-room-1",
+                }
+            ).encode("utf-8"),
+            content_type="application/json",
+        )
+
+        self.assertEqual(200, status)
+        self.assertEqual("chat ok", payload["text"])
+        self.assertEqual("weixin", self.bridge.chat_calls[0]["provider_type"])
+        self.assertEqual("status", self.bridge.chat_calls[0]["payload"]["command"])
+        self.assertEqual("AB#101", self.bridge.chat_calls[0]["payload"]["task_key"])
+
+    def test_api_run_command_requires_control_token_when_configured(self) -> None:
+        bridge = DummyBridge(self.store)
+        handler = create_handler(
+            bridge,
+            ingress_token="ingress-secret",
+            control_token="control-secret",
+        )
+        extra_httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=extra_httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            request = Request(
+                f"http://127.0.0.1:{extra_httpd.server_address[1]}/api/runs/run-1/command",
+                data=json.dumps({"command": "pause"}).encode("utf-8"),
+                method="POST",
+            )
+            request.add_header("Content-Type", "application/json")
+            request.add_header("Authorization", "Bearer ingress-secret")
+            try:
+                urlopen(request, timeout=5)
+                self.fail("Expected control token authorization to reject ingress token")
+            except HTTPError as exc:
+                status = int(exc.code)
+                payload = json.loads(exc.read().decode("utf-8"))
+                exc.close()
+            self.assertEqual(401, status)
+            self.assertEqual("unauthorized", payload["error"])
+        finally:
+            extra_httpd.shutdown()
+            extra_httpd.server_close()
+            thread.join(timeout=5)
+
+    def test_api_run_command_dispatches_bot_view_payload(self) -> None:
+        bridge = DummyBridge(self.store)
+        handler = create_handler(
+            bridge,
+            ingress_token="ingress-secret",
+            control_token="control-secret",
+        )
+        extra_httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=extra_httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            request = Request(
+                f"http://127.0.0.1:{extra_httpd.server_address[1]}/api/runs/run-1/command",
+                data=json.dumps({"command": "pause", "reason": "Need manual approval"}).encode("utf-8"),
+                method="POST",
+            )
+            request.add_header("Content-Type", "application/json")
+            request.add_header("Authorization", "Bearer control-secret")
+            with urlopen(request, timeout=5) as response:
+                status = int(response.status)
+                payload = json.loads(response.read().decode("utf-8"))
+            self.assertEqual(200, status)
+            self.assertTrue(payload["ok"])
+            self.assertEqual("bot-view", bridge.chat_calls[0]["provider_type"])
+            self.assertEqual("pause", bridge.chat_calls[0]["payload"]["command"])
+            self.assertEqual("run-1", bridge.chat_calls[0]["payload"]["run_id"])
+            self.assertEqual("Need manual approval", bridge.chat_calls[0]["payload"]["reason"])
         finally:
             extra_httpd.shutdown()
             extra_httpd.server_close()

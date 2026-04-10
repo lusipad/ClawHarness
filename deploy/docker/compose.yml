@@ -1,5 +1,6 @@
 services:
   openclaw-gateway:
+    profiles: ["shell"]
     build:
       context: ../..
       dockerfile: deploy/docker/openclaw-gateway.Dockerfile
@@ -51,50 +52,68 @@ services:
     image: clawharness/harness-bridge:local
     container_name: clawharness-bridge
     restart: unless-stopped
-    depends_on:
-      openclaw-gateway:
-        condition: service_healthy
     ports:
       - "${HARNESS_BRIDGE_PUBLISH_ADDR:-127.0.0.1}:8080:8080"
     environment:
       HOME: /home/node
       CODEX_HOME: /home/node/.codex
+      HARNESS_PROVIDER_PROFILE: ${HARNESS_PROVIDER_PROFILE:-local-task}
+      HARNESS_SHELL_ENABLED: ${HARNESS_SHELL_ENABLED:-0}
+      HARNESS_OWNER: ${HARNESS_OWNER:-harness-bridge}
       ADO_BASE_URL: ${ADO_BASE_URL}
       ADO_PROJECT: ${ADO_PROJECT}
       ADO_PAT: ${ADO_PAT}
       ADO_WEBHOOK_SECRET: ${ADO_WEBHOOK_SECRET}
+      GITHUB_BASE_URL: ${GITHUB_BASE_URL:-https://api.github.com}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       RC_WEBHOOK_URL: ${RC_WEBHOOK_URL}
+      RC_ROOM: ${RC_ROOM:-ai-dev}
       RC_COMMAND_TOKEN: ${RC_COMMAND_TOKEN:-}
       OPENCLAW_GATEWAY_BASE_URL: ${OPENCLAW_GATEWAY_BASE_URL:-http://openclaw-gateway:18789}
       HARNESS_INGRESS_TOKEN: ${HARNESS_INGRESS_TOKEN}
       HARNESS_READONLY_TOKEN: ${HARNESS_READONLY_TOKEN:-}
+      HARNESS_CONTROL_TOKEN: ${HARNESS_CONTROL_TOKEN:-}
       HARNESS_EXECUTOR_BACKEND: ${HARNESS_EXECUTOR_BACKEND:-codex-cli}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       CODEX_MODEL: ${CODEX_MODEL:-gpt-5.4}
       CODEX_REVIEW_MODEL: ${CODEX_REVIEW_MODEL:-}
       HARNESS_IMAGE_MODEL: ${HARNESS_IMAGE_MODEL:-}
+      LOCAL_REPO_PATH: ${LOCAL_REPO_PATH:-/mnt/local-repo}
+      LOCAL_TASKS_PATH: ${LOCAL_TASKS_PATH:-/mnt/local-tasks}
+      LOCAL_REVIEW_PATH: ${LOCAL_REVIEW_PATH:-/mnt/local-reviews}
+      LOCAL_BASE_BRANCH: ${LOCAL_BASE_BRANCH:-}
+      LOCAL_PUSH_ENABLED: ${LOCAL_PUSH_ENABLED:-0}
     volumes:
       - ${HARNESS_DATA_DIR:-./.data/harness}:/home/node/.openclaw/harness
       - ${OPENCLAW_DATA_DIR:-./.data/openclaw}:/home/node/.openclaw-gateway:ro
       - ${CODEX_HOME_DIR:-./.data/codex}:/home/node/.codex
       - ${OPENCLAW_WORKSPACE_DIR:-./.data/workspace/harness}:/home/node/.openclaw/workspace/harness
+      - ${LOCAL_REPO_DIR:-./.data/local/repo}:/mnt/local-repo
+      - ${LOCAL_TASKS_DIR:-./.data/local/tasks}:/mnt/local-tasks
+      - ${LOCAL_REVIEW_DIR:-./.data/local/reviews}:/mnt/local-reviews
       - ../config:/app/deploy/config:ro
     command:
       - sh
       - -lc
       - >
-        python /app/deploy/docker/render_openclaw_config.py
-        --gateway-config /home/node/.openclaw-gateway/openclaw.json
-        --output /tmp/openclaw.json &&
+        python /app/deploy/docker/render_providers_config.py
+        --output /tmp/providers.yaml &&
+        if [ "${HARNESS_SHELL_ENABLED:-0}" = "1" ] && [ -f /home/node/.openclaw-gateway/openclaw.json ]; then
+          python /app/deploy/docker/render_openclaw_config.py
+          --gateway-config /home/node/.openclaw-gateway/openclaw.json
+          --output /tmp/openclaw.json;
+          OPENCLAW_CONFIG_ARG="--openclaw-config /tmp/openclaw.json";
+        else
+          OPENCLAW_CONFIG_ARG="--openclaw-config /app/deploy/config/openclaw.json";
+        fi &&
         python -m harness_runtime.main
         --bind 0.0.0.0
         --port 8080
-        --providers-config /app/deploy/config/providers.yaml
+        --providers-config /tmp/providers.yaml
         --policy-config /app/deploy/config/harness-policy.yaml
-        --openclaw-config /tmp/openclaw.json
+        $OPENCLAW_CONFIG_ARG
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz').read()"]
       interval: 30s
@@ -123,6 +142,7 @@ services:
       HARNESS_BASE_URL: ${HARNESS_BASE_URL:-http://harness-bridge:8080}
       HARNESS_API_TOKEN: ${HARNESS_API_TOKEN:-}
       HARNESS_READONLY_TOKEN: ${HARNESS_READONLY_TOKEN:-}
+      HARNESS_CONTROL_TOKEN: ${HARNESS_CONTROL_TOKEN:-}
     volumes:
       - ${OPENCLAW_DATA_DIR:-./.data/openclaw}:/opt/openclaw:ro
     healthcheck:

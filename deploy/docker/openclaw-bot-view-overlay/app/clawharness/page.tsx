@@ -84,6 +84,52 @@ type GraphPayload = {
   artifacts: GraphEntry[];
 };
 
+type CommandPayload = {
+  ok: boolean;
+  command: string;
+  run_id: string | null;
+  response_type: string;
+  text: string;
+  attachments?: Array<{ title?: string }>;
+};
+
+type CompletionSummary = {
+  prCompleted: AuditEntry | null;
+  prPayload: Record<string, unknown> | null;
+  taskSyncEvent: AuditEntry | null;
+  taskSyncPayload: Record<string, unknown> | null;
+  taskSyncResult: "completed" | "failed" | "not_attempted";
+};
+
+type InterventionAction = {
+  kind: "pause" | "resume" | "escalate" | "add-context";
+  title: string;
+  createdAt: string;
+  detail: string | null;
+  userLabel: string | null;
+  providerType: string | null;
+  targetRunId: string | null;
+};
+
+type InterventionSummary = {
+  stateLabel: string;
+  stateTone: "neutral" | "info" | "warning" | "success" | "danger";
+  recommendation: string;
+  blockReason: string | null;
+  threadId: string | null;
+  latestAction: InterventionAction | null;
+  recentActions: InterventionAction[];
+  latestContextText: string | null;
+  contextCount: number;
+  latestImageSummary: string | null;
+  latestImageError: string | null;
+  canPause: boolean;
+  canResume: boolean;
+  canEscalate: boolean;
+  canAddContext: boolean;
+  actionHint: string;
+};
+
 const STATUS_OPTIONS = [
   "",
   "claimed",
@@ -130,6 +176,85 @@ function payloadToObject(payload: unknown) {
   return null;
 }
 
+function latestAuditEntry(entries: AuditEntry[], ...eventTypes: string[]) {
+  return [...entries].reverse().find((entry) => eventTypes.includes(entry.event_type)) ?? null;
+}
+
+function getDisplayValue(value: unknown) {
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return null;
+}
+
+function readField(record: Record<string, unknown> | null, key: string) {
+  if (!record) {
+    return null;
+  }
+  return getDisplayValue(record[key]);
+}
+
+function latestCheckpoint(entries: GraphEntry[], ...stages: string[]) {
+  return [...entries].reverse().find((entry) => entry.stage && stages.includes(entry.stage)) ?? null;
+}
+
+function snippet(value: string | null, limit = 120) {
+  if (!value) {
+    return null;
+  }
+  if (value.length <= limit) {
+    return value;
+  }
+  return `${value.slice(0, limit - 1)}...`;
+}
+
+function buildCheckpointAction(checkpoint: GraphEntry): InterventionAction | null {
+  const payload = payloadToObject(checkpoint.payload);
+  if (checkpoint.stage === "chat_pause") {
+    const command = readField(payload, "command") === "escalate" ? "escalate" : "pause";
+    return {
+      kind: command,
+      title: command === "escalate" ? "升级为人工介入" : "暂停运行",
+      createdAt: checkpoint.created_at,
+      detail: readField(payload, "reason"),
+      userLabel: readField(payload, "user_label"),
+      providerType: readField(payload, "provider_type"),
+      targetRunId: readField(payload, "target_run_id"),
+    };
+  }
+  if (checkpoint.stage === "chat_resume") {
+    return {
+      kind: "resume",
+      title: "恢复运行",
+      createdAt: checkpoint.created_at,
+      detail: readField(payload, "restored_status"),
+      userLabel: readField(payload, "user_label"),
+      providerType: readField(payload, "provider_type"),
+      targetRunId: null,
+    };
+  }
+  return null;
+}
+
+function buildContextAction(entry: AuditEntry): InterventionAction | null {
+  if (entry.event_type !== "chat_context_added") {
+    return null;
+  }
+  const payload = payloadToObject(entry.payload);
+  return {
+    kind: "add-context",
+    title: "追加上下文",
+    createdAt: entry.created_at,
+    detail: readField(payload, "text"),
+    userLabel: readField(payload, "user_label"),
+    providerType: readField(payload, "provider_type"),
+    targetRunId: readField(payload, "target_run_id"),
+  };
+}
+
 function getConclusionSummary(payload: unknown) {
   const record = payloadToObject(payload);
   if (!record) {
@@ -160,6 +285,11 @@ export default function ClawHarnessPage() {
   const [error, setError] = useState<string | null>(null);
   const [auditError, setAuditError] = useState<string | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [commandLoading, setCommandLoading] = useState(false);
+  const [commandError, setCommandError] = useState<string | null>(null);
+  const [commandResult, setCommandResult] = useState<string | null>(null);
+  const [contextInput, setContextInput] = useState("");
 
   const queryString = useMemo(() => {
     const query = new URLSearchParams();
@@ -172,6 +302,112 @@ export default function ClawHarnessPage() {
     }
     return query.toString();
   }, [status, taskKey]);
+
+  const completionSummary = useMemo<CompletionSummary | null>(() => {
+    if (!audit) {
+      return null;
+    }
+    const prCompleted = latestAuditEntry(audit.audit, "pr_completed");
+    const prPayload = payloadToObject(prCompleted?.payload);
+    const taskSyncEvent = latestAuditEntry(
+      audit.audit,
+      "task_completion_synced",
+      "task_completion_sync_failed",
+    );
+    const taskSyncPayload =
+      payloadToObject(taskSyncEvent?.payload) || payloadToObject(prPayload?.task_sync);
+    const taskSyncResult =
+      taskSyncEvent?.event_type === "task_completion_sync_failed" || readField(taskSyncPayload, "result") === "failed"
+        ? "failed"
+        : taskSyncPayload
+          ? "completed"
+          : "not_attempted";
+    return {
+      prCompleted,
+      prPayload,
+      taskSyncEvent,
+      taskSyncPayload,
+      taskSyncResult,
+    };
+  }, [audit]);
+
+  const interventionSummary = useMemo<InterventionSummary | null>(() => {
+    if (!audit) {
+      return null;
+    }
+
+    const checkpoints = graph?.checkpoints ?? [];
+    const latestPause = latestCheckpoint(checkpoints, "chat_pause");
+    const latestCommand = latestAuditEntry(audit.audit, "chat_command_received");
+    const latestContext = latestAuditEntry(audit.audit, "chat_context_added");
+    const latestImageCompleted = latestAuditEntry(audit.audit, "image_analysis_completed");
+    const latestImageFailed = latestAuditEntry(audit.audit, "image_analysis_failed");
+    const contextEntries = audit.audit.filter((entry) => entry.event_type === "chat_context_added");
+    const recentActions = [
+      ...checkpoints
+        .map((entry) => buildCheckpointAction(entry))
+        .filter((entry): entry is InterventionAction => Boolean(entry)),
+      ...audit.audit
+        .map((entry) => buildContextAction(entry))
+        .filter((entry): entry is InterventionAction => Boolean(entry)),
+    ]
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, 5);
+
+    const terminal = ["completed", "failed", "cancelled"].includes(audit.run.status);
+    const isAwaitingHuman = audit.run.status === "awaiting_human";
+    let stateLabel = "自动执行中";
+    let stateTone: InterventionSummary["stateTone"] = "info";
+    let recommendation = "当前处于自动闭环阶段，可补充上下文，必要时手动暂停或升级。";
+    if (isAwaitingHuman) {
+      stateLabel = "等待人工处理";
+      stateTone = "warning";
+      recommendation = "当前 run 已被人工暂停或升级，建议先判断阻塞原因，再恢复执行或继续补充上下文。";
+    } else if (audit.run.status === "completed") {
+      stateLabel = "闭环已完成";
+      stateTone = "success";
+      recommendation = "运行已经收口，建议只读检查审计、PR 与任务同步结果。";
+    } else if (audit.run.status === "failed") {
+      stateLabel = "运行失败";
+      stateTone = "danger";
+      recommendation = "先查看失败原因与最近上下文，再决定是否人工接管或重新发起后续操作。";
+    } else if (audit.run.status === "cancelled") {
+      stateLabel = "运行已取消";
+      stateTone = "neutral";
+      recommendation = "当前 run 已终止，不建议继续通过控制面追加操作。";
+    }
+
+    const blockReason =
+      audit.run.last_error || readField(payloadToObject(latestPause?.payload), "reason");
+    const threadId =
+      audit.run.chat_thread_id || readField(payloadToObject(latestCommand?.payload), "conversation_id");
+
+    let actionHint = "可执行暂停、升级和追加上下文。";
+    if (terminal) {
+      actionHint = "当前 run 已终态，建议只读查看；控制动作默认不再开放。";
+    } else if (isAwaitingHuman) {
+      actionHint = "当前 run 正在等待人工，优先使用“恢复运行”或继续补充上下文。";
+    }
+
+    return {
+      stateLabel,
+      stateTone,
+      recommendation,
+      blockReason,
+      threadId,
+      latestAction: recentActions[0] ?? null,
+      recentActions,
+      latestContextText: readField(payloadToObject(latestContext?.payload), "text"),
+      contextCount: contextEntries.length,
+      latestImageSummary: readField(payloadToObject(latestImageCompleted?.payload), "summary"),
+      latestImageError: readField(payloadToObject(latestImageFailed?.payload), "error"),
+      canPause: !terminal && !isAwaitingHuman,
+      canResume: isAwaitingHuman,
+      canEscalate: !terminal && !isAwaitingHuman,
+      canAddContext: !terminal,
+      actionHint,
+    };
+  }, [audit, graph]);
 
   useEffect(() => {
     let cancelled = false;
@@ -208,7 +444,7 @@ export default function ClawHarnessPage() {
     return () => {
       cancelled = true;
     };
-  }, [queryString]);
+  }, [queryString, refreshNonce]);
 
   useEffect(() => {
     if (!selectedRunId) {
@@ -269,7 +505,40 @@ export default function ClawHarnessPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedRunId]);
+  }, [selectedRunId, refreshNonce]);
+
+  async function runCommand(command: string, body: Record<string, unknown> = {}) {
+    if (!selectedRunId) {
+      return;
+    }
+    setCommandLoading(true);
+    setCommandError(null);
+    setCommandResult(null);
+    try {
+      const response = await fetch(`/api/clawharness/runs/${encodeURIComponent(selectedRunId)}/command`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command,
+          user_label: "bot-view",
+          ...body,
+        }),
+      });
+      const payload = (await response.json()) as CommandPayload & { detail?: string; error?: string };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.text || payload.detail || payload.error || "命令执行失败");
+      }
+      setCommandResult(payload.text);
+      if (command === "add-context") {
+        setContextInput("");
+      }
+      setRefreshNonce((value) => value + 1);
+    } catch (fetchError) {
+      setCommandError(fetchError instanceof Error ? fetchError.message : String(fetchError));
+    } finally {
+      setCommandLoading(false);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
@@ -512,6 +781,257 @@ export default function ClawHarnessPage() {
                     <div>会话：{audit.run.session_id}</div>
                   </div>
                   <div className="mt-2 text-[var(--text-muted)]">工作区：{audit.run.workspace_path || "-"}</div>
+                </div>
+                <div className="border border-[var(--border)] bg-[var(--bg)]/86 p-4 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Completion Summary</div>
+                      <div className="mt-1 text-[var(--text-muted)]">聚合展示 PR 合并后的 run 完成与 provider 任务回写结果。</div>
+                    </div>
+                    <div
+                      className={`border px-2 py-1 text-[11px] uppercase tracking-[0.18em] ${
+                        completionSummary?.prCompleted
+                          ? "border-emerald-400/35 bg-emerald-500/10 text-emerald-100"
+                          : "border-[var(--border)] text-[var(--text-muted)]"
+                      }`}
+                    >
+                      {completionSummary?.prCompleted ? "闭环已到达" : "等待合并"}
+                    </div>
+                  </div>
+                  {completionSummary?.prCompleted ? (
+                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                      <div className="border border-[var(--border)] px-3 py-3">
+                        <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">PR Merge</div>
+                        <div className="mt-2 text-sm">
+                          PR: {readField(completionSummary.prPayload, "pr_id") || audit.run.pr_id || "-"}
+                          <br />
+                          状态: {readField(completionSummary.prPayload, "status") || "-"} / Merge:{" "}
+                          {readField(completionSummary.prPayload, "merge_status") || "-"}
+                          <br />
+                          时间: {formatTime(readField(completionSummary.prPayload, "closed_date"))}
+                        </div>
+                        <div className="mt-2 text-xs text-[var(--text-muted)]">
+                          审计事件：{completionSummary.prCompleted.event_type} / {formatTime(completionSummary.prCompleted.created_at)}
+                        </div>
+                      </div>
+                      <div className="border border-[var(--border)] px-3 py-3">
+                        <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Merge Commit</div>
+                        <div className="mt-2 break-all text-sm">
+                          {readField(completionSummary.prPayload, "merge_commit") || "-"}
+                        </div>
+                        <div className="mt-2 text-xs text-[var(--text-muted)]">
+                          {readField(completionSummary.prPayload, "source_branch") || "-"} →{" "}
+                          {readField(completionSummary.prPayload, "target_branch") || "-"}
+                        </div>
+                      </div>
+                      <div className="border border-[var(--border)] px-3 py-3">
+                        <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Task Sync</div>
+                        <div
+                          className={`mt-2 inline-flex border px-2 py-1 text-[11px] uppercase tracking-[0.18em] ${
+                            completionSummary.taskSyncResult === "failed"
+                              ? "border-amber-400/35 bg-amber-500/10 text-amber-100"
+                              : completionSummary.taskSyncResult === "completed"
+                                ? "border-emerald-400/35 bg-emerald-500/10 text-emerald-100"
+                                : "border-[var(--border)] text-[var(--text-muted)]"
+                          }`}
+                        >
+                          {completionSummary.taskSyncResult === "failed"
+                            ? "回写失败"
+                            : completionSummary.taskSyncResult === "completed"
+                              ? "已回写"
+                              : "未执行"}
+                        </div>
+                        <div className="mt-2 text-sm">
+                          结果: {readField(completionSummary.taskSyncPayload, "result") || "-"}
+                          <br />
+                          任务状态: {readField(completionSummary.taskSyncPayload, "task_state") || "-"}
+                        </div>
+                        <div className="mt-2 text-xs text-[var(--text-muted)]">
+                          {completionSummary.taskSyncEvent
+                            ? `${completionSummary.taskSyncEvent.event_type} / ${formatTime(completionSummary.taskSyncEvent.created_at)}`
+                            : "当前 provider 未记录单独的任务同步事件"}
+                        </div>
+                      </div>
+                      <div className="border border-[var(--border)] px-3 py-3">
+                        <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Sync Notes</div>
+                        <div className="mt-2 break-all text-sm">
+                          {readField(completionSummary.taskSyncPayload, "error") || "任务同步失败不会回滚 run completed，只记审计并继续闭环。"}
+                        </div>
+                        <div className="mt-2 text-xs text-[var(--text-muted)]">
+                          Task ID: {readField(completionSummary.taskSyncPayload, "task_id") || audit.run.task_id || "-"}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-4 text-sm text-[var(--text-muted)]">
+                      当前 run 还没有记录到 `pr_completed` 审计事件，说明尚未到达 PR 合并闭环。
+                    </div>
+                  )}
+                </div>
+                <div className="border border-[var(--border)] bg-[var(--bg)]/86 p-4 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Intervention Status</div>
+                      <div className="mt-1 text-[var(--text-muted)]">聚合当前 run 的人工介入态势、最近操作与上下文补充结果。</div>
+                    </div>
+                    <div
+                      className={`border px-2 py-1 text-[11px] uppercase tracking-[0.18em] ${
+                        interventionSummary?.stateTone === "success"
+                          ? "border-emerald-400/35 bg-emerald-500/10 text-emerald-100"
+                          : interventionSummary?.stateTone === "warning"
+                            ? "border-amber-400/35 bg-amber-500/10 text-amber-100"
+                            : interventionSummary?.stateTone === "danger"
+                              ? "border-rose-400/35 bg-rose-500/10 text-rose-100"
+                              : interventionSummary?.stateTone === "info"
+                                ? "border-sky-400/35 bg-sky-500/10 text-sky-100"
+                                : "border-[var(--border)] text-[var(--text-muted)]"
+                      }`}
+                    >
+                      {interventionSummary?.stateLabel || "待分析"}
+                    </div>
+                  </div>
+                  {interventionSummary ? (
+                    <div className="mt-4 space-y-4">
+                      <div className="border border-[var(--border)] px-3 py-3">
+                        <div className="text-sm">{interventionSummary.recommendation}</div>
+                        <div className="mt-2 text-xs text-[var(--text-muted)]">{interventionSummary.actionHint}</div>
+                      </div>
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        <div className="border border-[var(--border)] px-3 py-3">
+                          <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">人工阻塞 / 线程</div>
+                          <div className="mt-2 text-sm">
+                            阻塞原因: {interventionSummary.blockReason || "无"}
+                            <br />
+                            会话线程: {interventionSummary.threadId || "-"}
+                          </div>
+                        </div>
+                        <div className="border border-[var(--border)] px-3 py-3">
+                          <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">最近人工动作</div>
+                          {interventionSummary.latestAction ? (
+                            <div className="mt-2 text-sm">
+                              {interventionSummary.latestAction.title}
+                              <br />
+                              {snippet(interventionSummary.latestAction.detail, 100) || "无额外说明"}
+                              <div className="mt-2 text-xs text-[var(--text-muted)]">
+                                {interventionSummary.latestAction.userLabel || "unknown"} /{" "}
+                                {interventionSummary.latestAction.providerType || "unknown"} /{" "}
+                                {formatTime(interventionSummary.latestAction.createdAt)}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="mt-2 text-sm text-[var(--text-muted)]">当前还没有人工干预记录。</div>
+                          )}
+                        </div>
+                        <div className="border border-[var(--border)] px-3 py-3">
+                          <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">上下文补充</div>
+                          <div className="mt-2 text-sm">
+                            已追加次数: {interventionSummary.contextCount}
+                            <br />
+                            最近内容: {snippet(interventionSummary.latestContextText, 110) || "无"}
+                          </div>
+                        </div>
+                        <div className="border border-[var(--border)] px-3 py-3">
+                          <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">图片识别 / 异常</div>
+                          <div className="mt-2 text-sm">
+                            {snippet(interventionSummary.latestImageSummary, 110) ||
+                              snippet(interventionSummary.latestImageError, 110) ||
+                              "当前没有图片识别结果"}
+                          </div>
+                        </div>
+                      </div>
+                      {interventionSummary.recentActions.length > 0 ? (
+                        <div>
+                          <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Recent Interventions</div>
+                          <div className="space-y-2">
+                            {interventionSummary.recentActions.map((action, index) => (
+                              <div key={`${action.kind}-${action.createdAt}-${index}`} className="border border-[var(--border)] px-3 py-2">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="font-medium">{action.title}</span>
+                                  <span className="text-xs text-[var(--text-muted)]">{formatTime(action.createdAt)}</span>
+                                </div>
+                                <div className="mt-1 text-sm">{snippet(action.detail, 140) || "无额外说明"}</div>
+                                <div className="mt-1 text-xs text-[var(--text-muted)]">
+                                  {action.userLabel || "unknown"} / {action.providerType || "unknown"}
+                                  {action.targetRunId ? ` / target ${action.targetRunId}` : ""}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="border border-[var(--border)] bg-[var(--bg)]/86 p-4 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Controlled Actions</div>
+                      <div className="mt-1 text-[var(--text-muted)]">
+                        这些动作会通过受控 token 调用 bridge 控制 API，并写入同一条审计链。
+                      </div>
+                    </div>
+                    <div className="text-xs text-[var(--text-muted)]">{commandLoading ? "执行中..." : "ready"}</div>
+                  </div>
+                  <div className="mt-3 text-xs text-[var(--text-muted)]">{interventionSummary?.actionHint || "请选择 run 后执行控制动作。"}</div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      title={interventionSummary?.canPause ? "将当前 run 切换为 awaiting_human" : "当前状态不适合暂停"}
+                      disabled={commandLoading || !interventionSummary?.canPause}
+                      onClick={() => runCommand("pause", { reason: "Paused from bot-view" })}
+                      className="border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      暂停运行
+                    </button>
+                    <button
+                      type="button"
+                      title={interventionSummary?.canResume ? "恢复到暂停前状态" : "当前状态不需要恢复"}
+                      disabled={commandLoading || !interventionSummary?.canResume}
+                      onClick={() => runCommand("resume")}
+                      className="border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      恢复运行
+                    </button>
+                    <button
+                      type="button"
+                      title={interventionSummary?.canEscalate ? "标记为需要人工接管" : "当前状态不适合升级"}
+                      disabled={commandLoading || !interventionSummary?.canEscalate}
+                      onClick={() => runCommand("escalate", { reason: "Escalated from bot-view" })}
+                      className="border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      升级人工
+                    </button>
+                  </div>
+                  <div className="mt-4">
+                    <label className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Add Context</label>
+                    <textarea
+                      value={contextInput}
+                      onChange={(event) => setContextInput(event.target.value)}
+                      rows={4}
+                      placeholder="补充限制条件、风险说明、人工判断或下一步要求"
+                      className="mt-2 w-full border border-[var(--border)] bg-[#0b0f14] px-3 py-2 text-sm text-[#dbe7f3] outline-none"
+                    />
+                    <div className="mt-2 flex items-center justify-between gap-3">
+                      <div className="text-xs text-[var(--text-muted)]">
+                        当前目标：{selectedRunId}
+                      </div>
+                      <button
+                        type="button"
+                        title={interventionSummary?.canAddContext ? "把新的限制、判断或图片说明写入 run 审计链" : "终态 run 默认不再追加上下文"}
+                        disabled={commandLoading || !contextInput.trim() || !interventionSummary?.canAddContext}
+                        onClick={() => runCommand("add-context", { context_text: contextInput.trim() })}
+                        className="border border-[var(--accent)]/35 bg-[var(--accent)]/12 px-3 py-2 text-sm text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        追加上下文
+                      </button>
+                    </div>
+                  </div>
+                  {commandError ? (
+                    <div className="mt-3 border border-amber-400/30 bg-amber-500/10 p-3 text-sm text-amber-200">{commandError}</div>
+                  ) : null}
+                  {commandResult ? (
+                    <div className="mt-3 border border-[var(--accent)]/25 bg-[var(--accent)]/8 p-3 text-sm text-[var(--text)] whitespace-pre-wrap">{commandResult}</div>
+                  ) : null}
                 </div>
                 {audit.audit.length > 0 ? (
                   audit.audit.map((entry) => (

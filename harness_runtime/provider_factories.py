@@ -5,10 +5,11 @@ from github_client import GitHubRestClient
 from local_client import LocalTaskClient
 from workflow_provider import WorkflowProviderClient
 
-from .config import HarnessRuntimeConfig
+from .capability_registry import RuntimeCapabilityContext
 
 
-def create_azure_devops_task_provider(config: HarnessRuntimeConfig) -> WorkflowProviderClient | None:
+def create_azure_devops_task_provider(context: RuntimeCapabilityContext) -> WorkflowProviderClient | None:
+    config = context.config
     if config.azure_devops is None:
         return None
     return AzureDevOpsRestClient(
@@ -18,7 +19,8 @@ def create_azure_devops_task_provider(config: HarnessRuntimeConfig) -> WorkflowP
     )
 
 
-def create_github_task_provider(config: HarnessRuntimeConfig) -> WorkflowProviderClient | None:
+def create_github_task_provider(context: RuntimeCapabilityContext) -> WorkflowProviderClient | None:
+    config = context.config
     if config.github is None:
         return None
     return GitHubRestClient(
@@ -27,7 +29,8 @@ def create_github_task_provider(config: HarnessRuntimeConfig) -> WorkflowProvide
     )
 
 
-def create_local_task_provider(config: HarnessRuntimeConfig) -> WorkflowProviderClient | None:
+def create_local_task_provider(context: RuntimeCapabilityContext) -> WorkflowProviderClient | None:
+    config = context.config
     if config.local_task is None:
         return None
     return LocalTaskClient(

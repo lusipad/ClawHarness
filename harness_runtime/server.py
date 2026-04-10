@@ -18,6 +18,7 @@ def create_handler(
     *,
     ingress_token: str | None,
     readonly_token: str | None = None,
+    control_token: str | None = None,
     chat_command_token: str | None = None,
     github_webhook_secret: str | None = None,
 ):
@@ -33,8 +34,8 @@ def create_handler(
                 self._write_json(HTTPStatus.OK, {"status": "ready"})
                 return
             if parsed.path.startswith("/api/"):
-                api_token = readonly_token or ingress_token
-                if api_token and not self._is_authorized(api_token):
+                api_tokens = [token for token in (readonly_token, control_token, ingress_token) if token]
+                if api_tokens and not self._is_authorized_any(api_tokens):
                     self._write_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
                     return
                 self._handle_api_get(parsed)
@@ -43,6 +44,13 @@ def create_handler(
 
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
+            if parsed.path.startswith("/api/"):
+                api_token = control_token or ingress_token
+                if api_token and not self._is_authorized(api_token):
+                    self._write_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+                    return
+                self._handle_api_post(parsed)
+                return
             if parsed.path == "/webhooks/chat/rocketchat":
                 raw = self._read_body()
                 if raw is None:
@@ -57,6 +65,22 @@ def create_handler(
                     self._write_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
                     return
                 result = bridge.handle_chat_command(provider_type="rocketchat", payload=payload)
+                self._write_json(HTTPStatus.OK, result.to_payload())
+                return
+            if parsed.path == "/webhooks/chat/weixin":
+                raw = self._read_body()
+                if raw is None:
+                    self._write_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_body"})
+                    return
+                payload = self._load_structured_bytes(raw)
+                if payload is None:
+                    self._write_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_body"})
+                    return
+                expected_token = chat_command_token or ingress_token
+                if expected_token and str(payload.get("token") or "").strip() != expected_token:
+                    self._write_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+                    return
+                result = bridge.handle_chat_command(provider_type="weixin", payload=payload)
                 self._write_json(HTTPStatus.OK, result.to_payload())
                 return
             if parsed.path == "/webhooks/github":
@@ -215,6 +239,35 @@ def create_handler(
 
             self._write_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
+        def _handle_api_post(self, parsed) -> None:
+            parts = [part for part in parsed.path.split("/") if part]
+            if len(parts) == 4 and parts[0] == "api" and parts[1] == "runs" and parts[3] == "command":
+                raw = self._read_body()
+                if raw is None:
+                    self._write_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_json"})
+                    return
+                payload = self._load_json_bytes(raw)
+                if payload is None:
+                    self._write_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_json"})
+                    return
+                command_payload = dict(payload)
+                command_payload.setdefault("run_id", parts[2])
+                result = bridge.handle_chat_command(provider_type="bot-view", payload=command_payload)
+                status = HTTPStatus.OK if result.ok else HTTPStatus.BAD_REQUEST
+                self._write_json(
+                    status,
+                    {
+                        "ok": result.ok,
+                        "command": result.command,
+                        "run_id": result.run_id,
+                        "response_type": result.response_type,
+                        "text": result.text,
+                        "attachments": result.attachments,
+                    },
+                )
+                return
+            self._write_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+
         def _is_authorized(self, token: str) -> bool:
             auth_header = self.headers.get("Authorization")
             if auth_header == f"Bearer {token}":
@@ -222,6 +275,9 @@ def create_handler(
             if self.headers.get("x-harness-token") == token:
                 return True
             return False
+
+        def _is_authorized_any(self, tokens: list[str]) -> bool:
+            return any(self._is_authorized(token) for token in tokens)
 
         def _read_body(self) -> bytes | None:
             try:
@@ -376,6 +432,7 @@ def serve(
     port: int,
     ingress_token: str | None,
     readonly_token: str | None = None,
+    control_token: str | None = None,
     chat_command_token: str | None = None,
     github_webhook_secret: str | None = None,
 ) -> ThreadingHTTPServer:
@@ -383,6 +440,7 @@ def serve(
         bridge,
         ingress_token=ingress_token,
         readonly_token=readonly_token,
+        control_token=control_token,
         chat_command_token=chat_command_token,
         github_webhook_secret=github_webhook_secret,
     )

@@ -117,6 +117,34 @@ class AzureDevOpsRestClient:
             body={"text": text},
         )
 
+    def complete_task(
+        self,
+        work_item_id: int | str,
+        *,
+        repo_id: str | None = None,
+        comment: str | None = None,
+    ) -> dict[str, Any]:
+        del repo_id
+        last_error: AzureDevOpsApiError | None = None
+        updated_task: dict[str, Any] | None = None
+        for target_state in ("Done", "Closed"):
+            try:
+                updated_task = self.update_task_fields(
+                    work_item_id,
+                    [
+                        {"op": "add", "path": "/fields/System.State", "value": target_state},
+                    ],
+                )
+                break
+            except AzureDevOpsApiError as exc:
+                last_error = exc
+        if updated_task is None:
+            assert last_error is not None
+            raise last_error
+        if comment:
+            self.add_task_comment(work_item_id, comment)
+        return updated_task
+
     def list_repositories(self) -> list[RepositoryInfo]:
         response = self._request_json("GET", "_apis/git/repositories")
         return [self._repository_from_mapping(item) for item in response.get("value", [])]
@@ -423,10 +451,11 @@ class AzureDevOpsRestClient:
             if isinstance(repo, Mapping):
                 repo_id = self._pick_value(repo, ["id"])
 
+        normalized_event_type = self._normalize_event_type(event_type=event_type, resource=resource)
         task_key = self._derive_task_key(payload, resource, task_id)
 
         return NormalizedAdoEvent(
-            event_type=event_type,
+            event_type=normalized_event_type,
             provider_type=self.provider_type,
             source_id=source_id or self._pick_value(payload, ["id", "eventId"]),
             task_id=str(task_id) if task_id is not None else None,
@@ -438,6 +467,24 @@ class AzureDevOpsRestClient:
             actor=actor,
             payload=dict(payload),
         )
+
+    def _normalize_event_type(self, *, event_type: str, resource: Mapping[str, Any]) -> str:
+        normalized = str(event_type or "").strip()
+        if not normalized:
+            return normalized
+        if self._is_pull_request_merged_event(event_type=normalized, resource=resource):
+            return "pr.merged"
+        return normalized
+
+    def _is_pull_request_merged_event(self, *, event_type: str, resource: Mapping[str, Any]) -> bool:
+        if self._pick_value(resource, ["pullRequestId", "pull_request_id", "artifactId"]) is None:
+            return False
+        event_key = event_type.replace("-", "").replace("_", "").lower()
+        if not (event_key.startswith("pr.") or "pullrequest" in event_key):
+            return False
+        status = str(resource.get("status") or "").strip().lower()
+        merge_status = str(resource.get("mergeStatus") or resource.get("merge_status") or "").strip().lower()
+        return status == "completed" and merge_status == "succeeded"
 
     def _repository_from_mapping(self, payload: Mapping[str, Any]) -> RepositoryInfo:
         repository_id = payload.get("id")

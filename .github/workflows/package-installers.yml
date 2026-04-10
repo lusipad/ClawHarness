@@ -1,0 +1,113 @@
+name: package-installers
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      include_offline_images:
+        description: "Build and attach an offline Docker image archive"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  package-installers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Derive package label
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            label="${GITHUB_REF_NAME}"
+          else
+            label="${GITHUB_SHA::12}"
+          fi
+          safe_label="$(echo "${label}" | tr '/:@' '-' )"
+          echo "PACKAGE_LABEL=${safe_label}" >> "$GITHUB_ENV"
+
+      - name: Verify packaging tests
+        run: python -m unittest tests.test_deploy_bundle_assets tests.test_release_package_assets -v
+
+      - name: Verify packaging scripts compile
+        run: python -m compileall deploy/package deploy/windows
+
+      - name: Build offline Docker image archive
+        if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.include_offline_images)
+        shell: bash
+        run: |
+          mkdir -p dist/offline
+          docker build \
+            -f deploy/docker/harness-bridge.Dockerfile \
+            -t clawharness/harness-bridge:local \
+            .
+          docker build \
+            --build-arg OPENCLAW_IMAGE=ghcr.io/openclaw/openclaw:latest \
+            --build-arg CODEX_CLI_VERSION=0.118.0 \
+            -f deploy/docker/openclaw-gateway.Dockerfile \
+            -t clawharness/openclaw-gateway:local \
+            .
+          docker build \
+            --build-arg OPENCLAW_BOT_REVIEW_REF=81deb042b5caecf109db9f7fa031b5063b671e20 \
+            -f deploy/docker/openclaw-bot-view.Dockerfile \
+            -t clawharness/openclaw-bot-view:local \
+            .
+          docker save \
+            -o "dist/offline/clawharness-images-${PACKAGE_LABEL}.tar" \
+            clawharness/openclaw-gateway:local \
+            clawharness/harness-bridge:local \
+            clawharness/openclaw-bot-view:local
+
+      - name: Package installer artifacts
+        shell: bash
+        run: |
+          args=(
+            --output dist/github-actions
+            --label "${PACKAGE_LABEL}"
+            --force
+          )
+          image_archive="dist/offline/clawharness-images-${PACKAGE_LABEL}.tar"
+          if [[ -f "${image_archive}" ]]; then
+            args+=(--image-archive "${image_archive}")
+          fi
+          python deploy/package/package_release_assets.py "${args[@]}"
+
+      - name: Summarize packaged artifacts
+        shell: bash
+        run: |
+          {
+            echo "## Packaged artifacts"
+            echo
+            ls -lh dist/github-actions/artifacts
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload packaged artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: clawharness-installers-${{ env.PACKAGE_LABEL }}
+          path: dist/github-actions/artifacts/*
+          if-no-files-found: error
+
+      - name: Publish release assets
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          prerelease: ${{ contains(github.ref_name, '-alpha') }}
+          files: dist/github-actions/artifacts/*

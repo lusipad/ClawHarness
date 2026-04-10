@@ -32,6 +32,16 @@ class GitHubRuntimeConfig:
 
 
 @dataclass(frozen=True)
+class LocalTaskRuntimeConfig:
+    mode: str
+    repository_path: str | None
+    task_directory: str | None
+    review_directory: str | None
+    base_branch: str | None
+    push_enabled: bool
+
+
+@dataclass(frozen=True)
 class RocketChatRuntimeConfig:
     mode: str
     webhook_url: str | None
@@ -75,13 +85,16 @@ class HarnessRuntimeConfig:
     rocketchat: RocketChatRuntimeConfig
     executor: ExecutorRuntimeConfig
     runtime: RuntimeStorageConfig
-    openclaw_hooks: OpenClawHooksConfig
+    openclaw_hooks: OpenClawHooksConfig | None
     openclaw_gateway_token: str | None
     ingress_token: str | None
     owner: str
     github: GitHubRuntimeConfig | None = None
+    local_task: LocalTaskRuntimeConfig | None = None
     default_task_provider: str = "azure-devops"
     readonly_token: str | None = None
+    control_token: str | None = None
+    shell_enabled: bool = False
 
 
 def load_harness_runtime_config(
@@ -94,7 +107,6 @@ def load_harness_runtime_config(
     env_map = dict(os.environ if env is None else env)
     providers = _load_yaml_file(providers_path)
     _ = _load_yaml_file(policy_path)
-    openclaw = _load_json_file(openclaw_path)
 
     providers_root = _require_mapping(providers, "providers")
     runtime_root = _require_mapping(providers, "runtime")
@@ -103,18 +115,45 @@ def load_harness_runtime_config(
     chat = _require_mapping(providers_root, "chat")
     executor = _require_mapping(providers_root, "executor")
     storage = _require_mapping(runtime_root, "storage")
-    hooks = _require_mapping(openclaw, "hooks")
+    shell_root = _optional_mapping(runtime_root, "shell")
+    shell_enabled = _resolve_shell_enabled(
+        shell_root=shell_root,
+        env_map=env_map,
+        openclaw_path=openclaw_path,
+    )
 
     azure_devops_root = _resolve_provider_mapping(task_pr_ci, family="azure-devops", nested_key="azure_devops")
     github_root = _resolve_provider_mapping(task_pr_ci, family="github", nested_key="github")
+    local_task_root = _resolve_provider_mapping(task_pr_ci, family="local-task", nested_key="local_task")
     default_task_provider = _optional_string(task_pr_ci, "default_provider") or _optional_string(task_pr_ci, "family")
     if not default_task_provider:
-        if azure_devops_root is not None:
+        if local_task_root is not None:
+            default_task_provider = "local-task"
+        elif azure_devops_root is not None:
             default_task_provider = "azure-devops"
         elif github_root is not None:
             default_task_provider = "github"
         else:
-            default_task_provider = "azure-devops"
+            default_task_provider = "local-task"
+
+    openclaw_hooks = None
+    openclaw_gateway_token = None
+    owner = _resolve_runtime_owner(runtime_root, env_map)
+    ingress_token = env_map.get("HARNESS_INGRESS_TOKEN")
+    if shell_enabled:
+        openclaw = _load_json_file(openclaw_path)
+        hooks = _require_mapping(openclaw, "hooks")
+        openclaw_hooks = OpenClawHooksConfig(
+            base_url=_require_resolved_string(openclaw, "gatewayBaseUrl", env_map),
+            token=_resolve_placeholder(_require_string(hooks, "token"), env_map),
+            path=_require_resolved_string(hooks, "path", env_map),
+            agent_id=_require_resolved_string(hooks, "defaultAgentId", env_map),
+            default_session_key=_require_resolved_string(hooks, "defaultSessionKey", env_map),
+            wake_mode=_require_resolved_string(hooks, "wakeMode", env_map),
+        )
+        openclaw_gateway_token = _resolve_placeholder(_optional_string(openclaw, "gatewayToken"), env_map)
+        owner = _resolve_runtime_owner(runtime_root, env_map, fallback=_resolve_runtime_owner(hooks, env_map))
+        ingress_token = _resolve_placeholder(_optional_string(hooks, "ingressToken"), env_map) or ingress_token
 
     return HarnessRuntimeConfig(
         azure_devops=_load_azure_devops_runtime_config(azure_devops_root, env_map),
@@ -140,20 +179,16 @@ def load_harness_runtime_config(
             terminal_run_retention_days=int(runtime_root.get("terminal_run_retention_days", 30)),
             cleanup_batch_size=int(runtime_root.get("cleanup_batch_size", 50)),
         ),
-        openclaw_hooks=OpenClawHooksConfig(
-            base_url=_require_resolved_string(openclaw, "gatewayBaseUrl", env_map),
-            token=_resolve_placeholder(_require_string(hooks, "token"), env_map),
-            path=_require_resolved_string(hooks, "path", env_map),
-            agent_id=_require_resolved_string(hooks, "defaultAgentId", env_map),
-            default_session_key=_require_resolved_string(hooks, "defaultSessionKey", env_map),
-            wake_mode=_require_resolved_string(hooks, "wakeMode", env_map),
-        ),
-        openclaw_gateway_token=_resolve_placeholder(_optional_string(openclaw, "gatewayToken"), env_map),
-        ingress_token=_resolve_placeholder(_optional_string(hooks, "ingressToken"), env_map),
+        openclaw_hooks=openclaw_hooks,
+        openclaw_gateway_token=openclaw_gateway_token,
+        ingress_token=ingress_token,
         github=_load_github_runtime_config(github_root, env_map),
+        local_task=_load_local_task_runtime_config(local_task_root, env_map),
         default_task_provider=default_task_provider,
         readonly_token=env_map.get("HARNESS_READONLY_TOKEN"),
-        owner=_require_resolved_string(hooks, "owner", env_map),
+        control_token=env_map.get("HARNESS_CONTROL_TOKEN"),
+        owner=owner,
+        shell_enabled=shell_enabled,
     )
 
 
@@ -184,6 +219,15 @@ def _require_mapping(mapping: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     return value
 
 
+def _optional_mapping(mapping: Mapping[str, Any], key: str) -> Mapping[str, Any] | None:
+    value = mapping.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ConfigError(f"Expected mapping: {key}")
+    return value
+
+
 def _resolve_provider_mapping(
     mapping: Mapping[str, Any],
     *,
@@ -197,6 +241,34 @@ def _resolve_provider_mapping(
     if candidate_family == family:
         return mapping
     return None
+
+
+def _resolve_shell_enabled(
+    *,
+    shell_root: Mapping[str, Any] | None,
+    env_map: Mapping[str, str],
+    openclaw_path: str | Path,
+) -> bool:
+    env_value = env_map.get("HARNESS_SHELL_ENABLED")
+    if env_value is not None:
+        return _parse_bool(env_value, key="HARNESS_SHELL_ENABLED")
+    if shell_root is not None and "enabled" in shell_root:
+        return _resolve_optional_bool(shell_root, env_map, "enabled", default=False)
+    return Path(openclaw_path).exists()
+
+
+def _resolve_runtime_owner(
+    mapping: Mapping[str, Any],
+    env_map: Mapping[str, str],
+    *,
+    fallback: str | None = None,
+) -> str:
+    resolved = _resolve_optional_string(mapping, env_map, "owner")
+    if resolved:
+        return resolved
+    if fallback:
+        return fallback
+    return env_map.get("HARNESS_OWNER", "").strip() or "harness-bridge"
 
 
 def _load_azure_devops_runtime_config(
@@ -229,6 +301,22 @@ def _load_github_runtime_config(
         mode=_require_resolved_string(mapping, "mode", env_map),
         token=_resolve_secret(_require_mapping(mapping, "auth"), env_map, "secret_env"),
         webhook_secret=_resolve_nested_secret(mapping, env_map, "events", "webhook_secret_env"),
+    )
+
+
+def _load_local_task_runtime_config(
+    mapping: Mapping[str, Any] | None,
+    env_map: Mapping[str, str],
+) -> LocalTaskRuntimeConfig | None:
+    if mapping is None:
+        return None
+    return LocalTaskRuntimeConfig(
+        mode=_require_resolved_string(mapping, "mode", env_map),
+        repository_path=_resolve_optional_path(mapping, env_map, "repository_path"),
+        task_directory=_resolve_optional_path(mapping, env_map, "task_directory"),
+        review_directory=_resolve_optional_path(mapping, env_map, "review_directory"),
+        base_branch=_resolve_optional_string(mapping, env_map, "base_branch"),
+        push_enabled=_resolve_optional_bool(mapping, env_map, "push_enabled", default=False),
     )
 
 
@@ -286,6 +374,47 @@ def _resolve_required_string(value: str, key: str, env_map: Mapping[str, str]) -
     if not resolved:
         raise ConfigError(f"Missing resolved string: {key}")
     return resolved
+
+
+def _resolve_optional_string(mapping: Mapping[str, Any], env_map: Mapping[str, str], key: str) -> str | None:
+    value = _optional_string(mapping, key)
+    if value is None:
+        return None
+    resolved = _resolve_placeholder(value, env_map)
+    return resolved or None
+
+
+def _resolve_optional_path(mapping: Mapping[str, Any], env_map: Mapping[str, str], key: str) -> str | None:
+    resolved = _resolve_optional_string(mapping, env_map, key)
+    if resolved is None:
+        return None
+    return _expand_filesystem_path(resolved, env_map)
+
+
+def _resolve_optional_bool(
+    mapping: Mapping[str, Any],
+    env_map: Mapping[str, str],
+    key: str,
+    *,
+    default: bool,
+) -> bool:
+    value = mapping.get(key)
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return _parse_bool((_resolve_placeholder(value, env_map) or value).strip(), key=key)
+    raise ConfigError(f"Expected boolean: {key}")
+
+
+def _parse_bool(value: str, *, key: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off", ""}:
+        return False
+    raise ConfigError(f"Expected boolean: {key}")
 
 
 _PATH_VAR_PATTERN = re.compile(r"%([^%]+)%|\$\{([^}]+)\}")

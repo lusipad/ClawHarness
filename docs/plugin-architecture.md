@@ -1,7 +1,7 @@
 # ClawHarness 插件与职责边界
 
 日期：2026-04-09
-状态：V2 架构收口基线
+状态：V3 已完成基线
 
 ## 一句话原则
 
@@ -104,9 +104,11 @@ Workflow 不保存第二份 skill 正文。
 - `openclaw-plugin/flows/pr-feedback.yaml`
 - `openclaw-plugin/flows/ci-recovery.yaml`
 
-### Built-in capability manifest
+### Built-in capability manifests
 
 - `harness_runtime/capabilities/builtin-task-providers.json`
+- `harness_runtime/capabilities/builtin-executors.json`
+- `harness_runtime/capabilities/builtin-notifiers.json`
 
 ## 维护规则
 
@@ -119,7 +121,9 @@ Workflow 不保存第二份 skill 正文。
 
 截至 2026-04-09：
 
+- local-first / core-only 已成为默认推荐路径
+- OpenClaw Shell 已降级为可选壳层，而不是核心运行前提
 - runtime 已优先读取 `skills/core/`
 - OpenClaw skills 已可由 canonical source 投影生成
-- task-provider 已进入 manifest-driven registry
+- task-provider / executor / notifier 已进入 manifest-driven registry
 - draft flow 已收缩为 `skill_id` / `capability_id` 引用层

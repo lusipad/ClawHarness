@@ -17,6 +17,7 @@ from harness_runtime.config import (
     RuntimeStorageConfig,
 )
 from harness_runtime.orchestrator import TaskRunOrchestrator
+from local_client import LocalTaskClient
 from run_store import RunStore, TaskRun
 
 
@@ -582,6 +583,92 @@ class TaskRunOrchestratorTests(unittest.TestCase):
         executor_selection = self.store.list_skill_selections(executor_child.run_id)
         self.assertEqual("task", executor_selection[0]["run_kind"])
         self.assertIn('"provider_type":"github"', executor_selection[0]["payload_json"])
+
+    def test_run_claimed_task_supports_local_task_provider_without_remote_pr_platform(self) -> None:
+        task_file = self.base / "local-tasks" / "task-offline.md"
+        task_file.parent.mkdir()
+        task_file.write_text("# Improve offline package\n\nAdd an offline startup path.\n", encoding="utf-8")
+        review_root = self.base / "local-reviews"
+        shell_runner = RecordingShellRunner()
+        shell_runner.queue()
+        shell_runner.queue()
+        shell_runner.queue()
+        shell_runner.queue()
+        shell_runner.queue(stdout=" M README.md\n")
+        shell_runner.queue()
+        shell_runner.queue()
+        shell_runner.queue(stdout="abc123\n")
+        local_client = LocalTaskClient(
+            repository_path=self.workspace,
+            task_directory=task_file.parent,
+            review_directory=review_root,
+            base_branch="main",
+            push_enabled=False,
+            shell_runner=shell_runner,
+        )
+        executor_runner = FakeExecutorRunner(
+            [
+                ExecutorResult(
+                    status="completed",
+                    summary="Plan the offline deployment change.",
+                    changed_files=[],
+                    checks=[],
+                    follow_up=["update deploy docs"],
+                ),
+                ExecutorResult(
+                    status="completed",
+                    summary="Updated offline deployment scripts and docs.",
+                    changed_files=["README.md"],
+                    checks=[],
+                    follow_up=[],
+                ),
+                ExecutorResult(
+                    status="approved",
+                    summary="Review passed.",
+                    changed_files=[],
+                    checks=[],
+                    follow_up=[],
+                ),
+                ExecutorResult(
+                    status="passed",
+                    summary="Verification passed.",
+                    changed_files=[],
+                    checks=[],
+                    follow_up=[],
+                ),
+            ],
+            session_ids=["local-plan", "local-exec", "local-review", "local-verify"],
+        )
+        orchestrator = TaskRunOrchestrator(
+            config=self.config,
+            store=self.store,
+            ado_client=None,
+            provider_clients={"local-task": local_client},
+            executor_runner=executor_runner,
+            shell_runner=shell_runner,
+        )
+
+        run, context = orchestrator.claim_manual_task(
+            task_id="task-offline",
+            repo_id=str(self.workspace),
+            provider_type="local-task",
+        )
+        final_run = orchestrator.run_claimed_task(run.run_id, task_context=context)
+
+        self.assertEqual("awaiting_review", final_run.status)
+        self.assertTrue(final_run.pr_id.startswith("local-"))
+        pr_artifact = next(item for item in self.store.list_artifacts(final_run.run_id) if item["artifact_type"] == "pull-request")
+        pr_payload = json.loads(pr_artifact["payload_json"])
+        self.assertTrue(Path(pr_payload["url"]).exists())
+        self.assertEqual("Improve offline package", context["fields"]["System.Title"])
+        comments_path = review_root / "task-comments" / "task-offline.jsonl"
+        self.assertTrue(comments_path.exists())
+        commands = [call["command"] for call in shell_runner.calls]
+        self.assertNotIn(["git", "push", "-u", "origin", f"HEAD:{final_run.branch_name}"], commands)
+        child_links = self.store.list_child_relationships(final_run.run_id)
+        executor_child = next(link["run"] for link in child_links if link["relation_type"] == "agent-executor")
+        executor_selection = self.store.list_skill_selections(executor_child.run_id)
+        self.assertIn('"provider_type":"local-task"', executor_selection[0]["payload_json"])
 
     def test_run_claimed_task_blocks_when_reviewer_rejects_patch(self) -> None:
         self.create_run()

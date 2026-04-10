@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import shutil
 import subprocess
 import time
 from dataclasses import asdict, dataclass, field
@@ -10,7 +13,7 @@ from typing import Any, Callable, Mapping
 
 SpawnSession = Callable[[dict[str, Any]], Mapping[str, Any]]
 CliShellRunner = Callable[
-    [list[str], str | Path | None, Mapping[str, str] | None, float | None],
+    [list[str], str | Path | None, Mapping[str, str] | None, float | None, str | None],
     subprocess.CompletedProcess[str],
 ]
 
@@ -62,7 +65,7 @@ class ExecutorResult:
             status=str(payload.get("status", "")),
             summary=str(payload.get("summary", "")),
             changed_files=[str(item) for item in payload.get("changed_files", [])],
-            checks=[dict(item) for item in payload.get("checks", [])],
+            checks=_normalize_checks_payload(payload.get("checks")),
             follow_up=[str(item) for item in payload.get("follow_up", [])],
         )
 
@@ -75,6 +78,21 @@ class ExecutorRunError(RuntimeError):
 class ExecutorRunOutcome:
     spawn: AcpSpawnResult
     result: ExecutorResult
+
+
+def _normalize_check_item(item: Any) -> dict[str, Any]:
+    if isinstance(item, Mapping):
+        return dict(item)
+    return {
+        "name": str(item),
+        "status": "informational",
+    }
+
+
+def _normalize_checks_payload(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [_normalize_check_item(item) for item in value]
 
 
 def _build_task_prompt(request: ExecutorRequest) -> str:
@@ -107,6 +125,7 @@ def _build_task_prompt(request: ExecutorRequest) -> str:
                 f"- Write a JSON result artifact to `{result_path}`.",
                 '- Required keys: "status", "summary", "changed_files", "checks", "follow_up".',
                 "- Use absolute or workspace-relative changed file paths.",
+                "- Whether or not the file write succeeds, your final response must be the same JSON object and nothing else.",
             ]
         )
     return "\n".join(sections)
@@ -237,14 +256,13 @@ class CodexCliRunner:
         codex_command: str = "codex",
         shell_runner: CliShellRunner | None = None,
     ):
-        self.codex_command = codex_command
+        self.codex_command = self._resolve_codex_command(codex_command)
         self.shell_runner = shell_runner or self._default_shell_runner
 
     def build_task_prompt(self, request: ExecutorRequest) -> str:
         return _build_task_prompt(request)
 
     def build_exec_command(self, request: ExecutorRequest, *, result_path: str | Path) -> list[str]:
-        prompt = self.build_task_prompt(request)
         last_message_path = str(Path(result_path).with_suffix(".last-message.txt"))
         return [
             self.codex_command,
@@ -257,7 +275,7 @@ class CodexCliRunner:
             request.workspace_path,
             "--output-last-message",
             last_message_path,
-            prompt,
+            "-",
         ]
 
     def run_and_wait(
@@ -272,11 +290,13 @@ class CodexCliRunner:
         del poll_interval_seconds
         request.validate()
         command = self.build_exec_command(request, result_path=result_path)
+        prompt = self.build_task_prompt(request)
         completed = self.shell_runner(
             command,
             request.workspace_path,
             {"GIT_TERMINAL_PROMPT": "0"},
             timeout_seconds,
+            prompt,
         )
         result_file = Path(result_path)
         if result_file.exists():
@@ -288,6 +308,21 @@ class CodexCliRunner:
                     raw={"command": command, "exit_code": completed.returncode},
                 ),
                 result=_load_result(result_file),
+            )
+        recovered = self._recover_result_from_last_message(request, result_file)
+        if recovered is not None:
+            return ExecutorRunOutcome(
+                spawn=AcpSpawnResult(
+                    accepted=True,
+                    child_session_key=None,
+                    session_id=resume_session_id or f"codex-cli:{int(time.time())}",
+                    raw={
+                        "command": command,
+                        "exit_code": completed.returncode,
+                        "recovered_from_last_message": True,
+                    },
+                ),
+                result=recovered,
             )
 
         if completed.returncode != 0:
@@ -302,12 +337,204 @@ class CodexCliRunner:
             excerpt = excerpt[:2000] + "...<truncated>"
         return f"Codex exec failed ({completed.returncode}): {' '.join(command)} | {excerpt}"
 
+    def _resolve_codex_command(self, codex_command: str) -> str:
+        if os.name != "nt":
+            return codex_command
+        if Path(codex_command).suffix or any(sep in codex_command for sep in ("/", "\\")):
+            return codex_command
+        for candidate in ("codex.cmd", "codex.exe", "codex.bat", codex_command):
+            if shutil.which(candidate):
+                return candidate
+        return codex_command
+
+    def _recover_result_from_last_message(
+        self,
+        request: ExecutorRequest,
+        result_path: Path,
+    ) -> ExecutorResult | None:
+        last_message_path = result_path.with_suffix(".last-message.txt")
+        try:
+            raw_message = last_message_path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        message = raw_message.strip()
+        if not message:
+            return None
+
+        default_changed_files = self._collect_changed_files(request.workspace_path)
+        default_follow_up = self._extract_follow_up(message)
+        payload = self._extract_json_payload(message)
+        if payload is None:
+            payload = {
+                "status": self._infer_status_from_last_message(message),
+                "summary": self._summarize_last_message(message),
+                "changed_files": default_changed_files,
+                "checks": [],
+                "follow_up": default_follow_up,
+            }
+        else:
+            payload = self._normalize_result_payload(
+                payload,
+                default_status=self._infer_status_from_last_message(message),
+                default_summary=self._summarize_last_message(message),
+                default_changed_files=default_changed_files,
+                default_follow_up=default_follow_up,
+            )
+
+        result_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        return ExecutorResult.from_mapping(payload)
+
+    def _normalize_result_payload(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        default_status: str,
+        default_summary: str,
+        default_changed_files: list[str],
+        default_follow_up: list[str],
+    ) -> dict[str, Any]:
+        changed_files = payload.get("changed_files")
+        checks = payload.get("checks")
+        follow_up = payload.get("follow_up")
+        normalized_follow_up = (
+            [str(item) for item in follow_up]
+            if isinstance(follow_up, list)
+            else list(default_follow_up)
+        )
+        return {
+            "status": str(payload.get("status") or default_status),
+            "summary": str(payload.get("summary") or default_summary),
+            "changed_files": (
+                [str(item) for item in changed_files]
+                if isinstance(changed_files, list)
+                else list(default_changed_files)
+            ),
+            "checks": _normalize_checks_payload(checks),
+            "follow_up": normalized_follow_up,
+        }
+
+    def _extract_json_payload(self, message: str) -> Mapping[str, Any] | None:
+        for candidate in self._json_candidates(message):
+            try:
+                payload = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, Mapping):
+                return payload
+        return None
+
+    def _json_candidates(self, message: str) -> list[str]:
+        candidates: list[str] = []
+        stripped = message.strip()
+        if stripped:
+            candidates.append(stripped)
+        if "```" in message:
+            parts = message.split("```")
+            for index in range(1, len(parts), 2):
+                part = parts[index].strip()
+                if not part:
+                    continue
+                if "\n" in part:
+                    header, remainder = part.split("\n", 1)
+                    if header.strip().lower() == "json":
+                        part = remainder.strip()
+                candidates.append(part)
+        brace_match = re.search(r"\{[\s\S]*\}", message)
+        if brace_match:
+            candidates.append(brace_match.group(0).strip())
+        return candidates
+
+    def _collect_changed_files(self, workspace_path: str) -> list[str]:
+        try:
+            completed = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=workspace_path,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return []
+        if completed.returncode != 0:
+            return []
+
+        changed_files: list[str] = []
+        for raw_line in completed.stdout.splitlines():
+            line = raw_line.rstrip()
+            if len(line) < 4:
+                continue
+            path_text = line[3:].strip()
+            if " -> " in path_text:
+                path_text = path_text.split(" -> ", 1)[1].strip()
+            normalized = path_text.replace("\\", "/")
+            if normalized and normalized not in changed_files:
+                changed_files.append(normalized)
+        return changed_files
+
+    def _extract_follow_up(self, message: str) -> list[str]:
+        headings = {"follow-up", "follow up", "next steps", "next step", "next actions", "remaining work"}
+        follow_up: list[str] = []
+        capture = False
+        for raw_line in message.splitlines():
+            line = raw_line.strip()
+            normalized = line.rstrip(":").strip().lower()
+            if normalized in headings:
+                capture = True
+                continue
+            if not capture:
+                continue
+            if not line:
+                if follow_up:
+                    break
+                continue
+            item = re.sub(r"^(?:[-*]|\d+[.)])\s*", "", line).strip()
+            if not item:
+                if follow_up:
+                    break
+                continue
+            follow_up.append(item)
+        return follow_up
+
+    def _infer_status_from_last_message(self, message: str) -> str:
+        explicit_status = re.search(
+            r'(?im)^\s*(?:status|result status)\s*[:=]\s*"?(completed|planned|success|needs_human|approved|passed|ready)"?\s*$',
+            message,
+        )
+        if explicit_status:
+            return explicit_status.group(1).lower()
+        normalized = message.lower()
+        blocked_signals = (
+            "needs_human",
+            "needs human",
+            "need human",
+            "awaiting_human",
+            "awaiting human",
+            "requires human",
+            "manual intervention",
+            "cannot proceed",
+            "can't proceed",
+            "not safe",
+            "too risky",
+            "blocked",
+        )
+        if any(token in normalized for token in blocked_signals):
+            return "needs_human"
+        return "completed"
+
+    def _summarize_last_message(self, message: str) -> str:
+        summary = message.strip()
+        if len(summary) > 4000:
+            return summary[:4000] + "...<truncated>"
+        return summary
+
     def _default_shell_runner(
         self,
         command: list[str],
         cwd: str | Path | None,
         env_overrides: Mapping[str, str] | None,
         timeout_seconds: float | None,
+        input_text: str | None,
     ) -> subprocess.CompletedProcess[str]:
         env = dict(**env_overrides) if env_overrides else None
         merged_env = None
@@ -316,8 +543,6 @@ class CodexCliRunner:
             merged_env = {**merged_env}
         base_env = None
         if merged_env is not None:
-            import os
-
             base_env = os.environ.copy()
             base_env.update(merged_env)
         return subprocess.run(
@@ -326,6 +551,7 @@ class CodexCliRunner:
             env=base_env,
             capture_output=True,
             text=True,
+            input=input_text,
             check=False,
             timeout=timeout_seconds,
         )

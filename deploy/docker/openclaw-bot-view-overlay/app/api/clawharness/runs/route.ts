@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 function buildHeaders() {
   const headers: Record<string, string> = { Accept: "application/json" };
   const token =
     process.env.HARNESS_API_TOKEN?.trim() ||
-    process.env.HARNESS_READONLY_TOKEN?.trim();
+    process.env.HARNESS_READONLY_TOKEN?.trim() ||
+    process.env.HARNESS_CONTROL_TOKEN?.trim();
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }

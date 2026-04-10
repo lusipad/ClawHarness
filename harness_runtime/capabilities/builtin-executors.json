@@ -1,0 +1,16 @@
+{
+  "id": "clawharness-builtin-executors",
+  "version": "2026-04-09",
+  "capabilities": [
+    {
+      "type": "executor",
+      "id": "codex-acp",
+      "factory": "harness_runtime.runtime_factories:create_codex_acp_executor"
+    },
+    {
+      "type": "executor",
+      "id": "codex-cli",
+      "factory": "harness_runtime.runtime_factories:create_codex_cli_executor"
+    }
+  ]
+}

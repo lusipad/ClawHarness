@@ -149,6 +149,30 @@ class CodexAcpRunnerTests(unittest.TestCase):
         self.assertEqual("session-inline", outcome.spawn.session_id)
         self.assertEqual("Inline result", outcome.result.summary)
 
+    def test_run_and_wait_normalizes_inline_string_checks(self) -> None:
+        self.spawner = lambda payload: {
+            "accepted": True,
+            "sessionId": "session-inline",
+            "result": {
+                "status": "completed",
+                "summary": "Inline result",
+                "changed_files": ["README.md"],
+                "checks": ["confirm README", "append section"],
+                "follow_up": [],
+            },
+        }
+        self.runner = CodexAcpRunner(self.spawner)
+
+        outcome = self.runner.run_and_wait(
+            self.make_request(),
+            result_path="D:/tmp/result.json",
+            timeout_seconds=0.1,
+            poll_interval_seconds=0.01,
+        )
+
+        self.assertEqual("confirm README", outcome.result.checks[0]["name"])
+        self.assertEqual("informational", outcome.result.checks[0]["status"])
+
     def test_run_and_wait_raises_when_result_times_out(self) -> None:
         with self.assertRaises(ExecutorRunError):
             self.runner.run_and_wait(

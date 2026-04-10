@@ -67,7 +67,7 @@ class HarnessBridge:
         ado_client: AzureDevOpsRestClient | None = None,
         github_client: GitHubRestClient | None = None,
         provider_clients: Mapping[str, WorkflowProviderClient] | None = None,
-        openclaw_client: OpenClawWebhookClient,
+        openclaw_client: OpenClawWebhookClient | None = None,
         notifier: RocketChatNotifier | None = None,
         task_orchestrator: TaskRunOrchestrator | None = None,
         image_analyzer: ImageAnalyzer | None = None,
@@ -297,7 +297,25 @@ class HarnessBridge:
             to_status="planning",
             expected_from="claimed",
         )
+        notification_summary = f"Task {task_key} claimed and dispatched to OpenClaw"
+        notification_details: dict[str, Any] = {
+            "event_type": normalized.event_type,
+            "dispatch_target": "openclaw-shell",
+        }
         if self.task_orchestrator is None:
+            if self.openclaw_client is None:
+                self.store.append_audit(
+                    claim.run.run_id,
+                    "task_dispatch_rejected",
+                    payload={"reason": "openclaw_shell_unavailable", "event_type": normalized.event_type},
+                )
+                return BridgeResult(
+                    accepted=False,
+                    action="task_dispatch_rejected",
+                    run_id=claim.run.run_id,
+                    reason="openclaw_shell_unavailable",
+                    session_key=session_key,
+                )
             self.openclaw_client.run_agent(
                 message=prompt,
                 name=f"{provider.display_name} Task",
@@ -313,6 +331,8 @@ class HarnessBridge:
                 payload={"event_type": normalized.event_type, "session_key": session_key},
             )
         else:
+            notification_summary = f"Task {task_key} claimed and queued for ClawHarness orchestration"
+            notification_details["dispatch_target"] = "clawharness-orchestrator"
             self.store.append_audit(
                 claim.run.run_id,
                 "task_run_queued",
@@ -327,8 +347,8 @@ class HarnessBridge:
             event_type="task_started",
             task_key=task_key,
             run_id=claim.run.run_id,
-            summary=f"Task {task_key} claimed and dispatched to OpenClaw",
-            details={"event_type": normalized.event_type},
+            summary=notification_summary,
+            details=notification_details,
         )
         return BridgeResult(
             accepted=True,
@@ -338,11 +358,13 @@ class HarnessBridge:
         )
 
     def _handle_pr_event(self, normalized: NormalizedProviderEvent) -> BridgeResult:
-        provider = self._provider_client(normalized.provider_type)
         run = self.store.find_run_by_pr_id(normalized.pr_id or "")
         if run is None:
             return BridgeResult(accepted=False, action="pr_resume_skipped", reason="run_not_found")
         root_run = self._resolve_root_run(run)
+        if self._is_pr_completion_event(normalized):
+            return self._complete_pr_run(root_run, normalized)
+        provider = self._provider_client(normalized.provider_type)
         if self.task_orchestrator is None:
             self.store.append_audit(
                 root_run.run_id,
@@ -413,6 +435,164 @@ class HarnessBridge:
             run_id=root_run.run_id,
             session_key=root_run.session_id,
         )
+
+    def _is_pr_completion_event(self, normalized: NormalizedProviderEvent) -> bool:
+        if normalized.event_type == "pr.merged":
+            return True
+        payload = normalized.payload
+        if normalized.provider_type == "azure-devops":
+            resource = payload.get("resource") if isinstance(payload.get("resource"), Mapping) else payload
+            status = str(resource.get("status") or "").strip().lower()
+            merge_status = str(resource.get("mergeStatus") or resource.get("merge_status") or "").strip().lower()
+            return status == "completed" and merge_status == "succeeded"
+        if normalized.provider_type == "github":
+            pull_request = payload.get("pull_request") if isinstance(payload.get("pull_request"), Mapping) else {}
+            action = str(payload.get("action") or "").strip().lower()
+            return action == "closed" and bool(pull_request.get("merged"))
+        return False
+
+    def _complete_pr_run(self, root_run: TaskRun, normalized: NormalizedProviderEvent) -> BridgeResult:
+        if not self.store.record_event(
+            self._fingerprint(normalized),
+            source_type=normalized.event_type,
+            source_id=normalized.source_id,
+        ):
+            return BridgeResult(
+                accepted=False,
+                action="pr_completion_skipped",
+                run_id=root_run.run_id,
+                reason="duplicate_event",
+                session_key=root_run.session_id,
+            )
+
+        completion_payload = self._pr_completion_payload(root_run, normalized)
+        latest_root = self.store.get_run(root_run.run_id) or root_run
+        if latest_root.status != "completed":
+            self.store.transition_status(
+                latest_root.run_id,
+                to_status="completed",
+                expected_from=(
+                    "claimed",
+                    "planning",
+                    "coding",
+                    "opening_pr",
+                    "awaiting_ci",
+                    "awaiting_review",
+                    "awaiting_human",
+                    "completed",
+                ),
+            )
+        task_sync = self._sync_task_completion(latest_root, normalized)
+        if task_sync is not None:
+            completion_payload["task_sync"] = task_sync
+        self.store.append_audit(
+            latest_root.run_id,
+            "pr_completed",
+            payload=completion_payload,
+        )
+        refreshed_root = self.store.get_run(latest_root.run_id) or latest_root
+        self._notify(
+            event_type="pr_completed",
+            task_key=refreshed_root.task_key,
+            run_id=refreshed_root.run_id,
+            summary=f"PR {normalized.pr_id} merged for {refreshed_root.task_key}; run marked completed",
+            details=completion_payload,
+        )
+        return BridgeResult(
+            accepted=True,
+            action="pr_completed",
+            run_id=refreshed_root.run_id,
+            session_key=refreshed_root.session_id,
+        )
+
+    def _pr_completion_payload(self, root_run: TaskRun, normalized: NormalizedProviderEvent) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "provider_type": normalized.provider_type,
+            "event_type": normalized.event_type,
+            "pr_id": normalized.pr_id,
+            "task_key": root_run.task_key,
+            "actor": normalized.actor,
+        }
+        raw_payload = normalized.payload
+        if normalized.provider_type == "azure-devops":
+            resource = raw_payload.get("resource") if isinstance(raw_payload.get("resource"), Mapping) else raw_payload
+            payload.update(
+                {
+                    "status": resource.get("status"),
+                    "merge_status": resource.get("mergeStatus") or resource.get("merge_status"),
+                    "source_branch": resource.get("sourceRefName"),
+                    "target_branch": resource.get("targetRefName"),
+                    "merge_commit": (
+                        resource.get("lastMergeCommit", {}).get("commitId")
+                        if isinstance(resource.get("lastMergeCommit"), Mapping)
+                        else None
+                    ),
+                    "closed_date": resource.get("closedDate"),
+                }
+            )
+        elif normalized.provider_type == "github":
+            pull_request = raw_payload.get("pull_request") if isinstance(raw_payload.get("pull_request"), Mapping) else {}
+            payload.update(
+                {
+                    "status": pull_request.get("state"),
+                    "merge_status": "succeeded" if pull_request.get("merged") else "not_merged",
+                    "source_branch": (
+                        pull_request.get("head", {}).get("ref")
+                        if isinstance(pull_request.get("head"), Mapping)
+                        else None
+                    ),
+                    "target_branch": (
+                        pull_request.get("base", {}).get("ref")
+                        if isinstance(pull_request.get("base"), Mapping)
+                        else None
+                    ),
+                    "merge_commit": pull_request.get("merge_commit_sha"),
+                    "closed_date": pull_request.get("closed_at"),
+                }
+            )
+        return payload
+
+    def _sync_task_completion(
+        self,
+        root_run: TaskRun,
+        normalized: NormalizedProviderEvent,
+    ) -> dict[str, Any] | None:
+        provider = self.provider_clients.get(normalized.provider_type)
+        complete_task = getattr(provider, "complete_task", None)
+        if complete_task is None:
+            return None
+
+        comment = (
+            f"ClawHarness automatically marked `{root_run.task_key}` complete after PR {normalized.pr_id} merged."
+        )
+        payload = {
+            "provider_type": normalized.provider_type,
+            "task_id": root_run.task_id,
+            "task_key": root_run.task_key,
+            "pr_id": normalized.pr_id,
+        }
+        try:
+            response = complete_task(root_run.task_id, repo_id=root_run.repo_id, comment=comment)
+            payload["result"] = "completed"
+            if isinstance(response, Mapping):
+                fields = response.get("fields")
+                payload["task_state"] = (
+                    fields.get("System.State")
+                    if isinstance(fields, Mapping)
+                    else response.get("state")
+                )
+            self.store.append_audit(root_run.run_id, "task_completion_synced", payload=payload)
+            return payload
+        except Exception as exc:
+            payload.update(
+                {
+                    "result": "failed",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+            self.store.append_audit(root_run.run_id, "task_completion_sync_failed", payload=payload)
+            return payload
 
     def _handle_ci_event(self, normalized: NormalizedProviderEvent) -> BridgeResult:
         provider = self._provider_client(normalized.provider_type)
@@ -564,7 +744,12 @@ class HarnessBridge:
 
     def _session_key(self, prefix: str, value: str) -> str:
         slug = re.sub(r"[^A-Za-z0-9._:-]+", "-", value).strip("-") or "unknown"
-        return f"{self.config.openclaw_hooks.default_session_key}:{prefix}:{slug}"
+        base_session_key = (
+            self.config.openclaw_hooks.default_session_key
+            if self.config.openclaw_hooks is not None
+            else f"core:{self.config.owner}"
+        )
+        return f"{base_session_key}:{prefix}:{slug}"
 
     def _resolve_root_run(self, run: TaskRun) -> TaskRun:
         current = run
@@ -582,13 +767,43 @@ class HarnessBridge:
         provider_type: str,
         payload: Mapping[str, Any],
     ) -> dict[str, Any] | None:
-        del provider_type
         raw_text = str(
             payload.get("text")
             or payload.get("message")
             or payload.get("msg")
             or ""
         ).strip()
+        direct_command = str(payload.get("command") or "").strip()
+        if provider_type in {"bot-view", "weixin"} and direct_command:
+            normalized_command = self._normalize_chat_command_name(direct_command)
+            if normalized_command in self._SUPPORTED_CHAT_COMMANDS:
+                selector = str(payload.get("run_id") or payload.get("task_key") or payload.get("selector") or "").strip()
+                detail = str(
+                    payload.get("context_text")
+                    or payload.get("reason")
+                    or payload.get("detail")
+                    or payload.get("args_text")
+                    or payload.get("argument")
+                    or payload.get("note")
+                    or ""
+                ).strip()
+                args_text = " ".join(part for part in (selector, detail) if part).strip()
+                user_label = str(
+                    payload.get("user_label")
+                    or payload.get("user_name")
+                    or payload.get("username")
+                    or payload.get("userName")
+                    or payload.get("user_id")
+                    or payload.get("userId")
+                    or "unknown-user"
+                )
+                return {
+                    "command": normalized_command,
+                    "args_text": args_text,
+                    "raw_text": raw_text or " ".join(part for part in (normalized_command, args_text) if part).strip(),
+                    "conversation_id": self._conversation_id(payload),
+                    "user_label": user_label,
+                }
         trigger_word = str(payload.get("trigger_word") or payload.get("triggerWord") or "").strip().lstrip("/")
         command_name = str(payload.get("command") or "").strip().lstrip("/")
         conversation_id = self._conversation_id(payload)
@@ -636,7 +851,22 @@ class HarnessBridge:
         return self._CHAT_COMMAND_ALIASES.get(normalized, normalized)
 
     def _conversation_id(self, payload: Mapping[str, Any]) -> str | None:
-        for key in ("thread_id", "threadId", "tmid", "channel_id", "channelId", "room_id", "roomId", "channel_name"):
+        for key in (
+            "conversation_id",
+            "conversationId",
+            "thread_id",
+            "threadId",
+            "tmid",
+            "channel_id",
+            "channelId",
+            "room_id",
+            "roomId",
+            "channel_name",
+            "session_key",
+            "sessionKey",
+            "open_id",
+            "openId",
+        ):
             value = payload.get(key)
             if value is None:
                 continue

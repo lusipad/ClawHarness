@@ -12,6 +12,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "deploy" / "docker" / "render_openclaw_config.py"
+PROVIDERS_RENDER_PATH = REPO_ROOT / "deploy" / "docker" / "render_providers_config.py"
 NODE_PATH = shutil.which("node")
 CODEX_AUTH_RENDER_PATH = REPO_ROOT / "deploy" / "docker" / "render_codex_auth.mjs"
 CODEX_CONFIG_RENDER_PATH = REPO_ROOT / "deploy" / "docker" / "render_codex_config.mjs"
@@ -151,6 +152,88 @@ class DockerRenderConfigTests(unittest.TestCase):
             self.assertEqual("now", payload["hooks"]["wakeMode"])
             self.assertEqual("harness-bridge", payload["hooks"]["owner"])
             self.assertEqual("ingress-secret", payload["hooks"]["ingressToken"])
+
+    def test_render_providers_config_defaults_to_local_task_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            output_path = base / "providers.yaml"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "LOCAL_REPO_PATH": "/mnt/local-repo",
+                    "LOCAL_TASKS_PATH": "/mnt/local-tasks",
+                    "LOCAL_REVIEW_PATH": "/mnt/local-reviews",
+                }
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(PROVIDERS_RENDER_PATH), "--output", str(output_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            contents = output_path.read_text(encoding="utf-8")
+            self.assertIn('default_provider: "local-task"', contents)
+            self.assertIn("family: local-task", contents)
+            self.assertIn("enabled: false", contents)
+            self.assertIn('backend: "codex-cli"', contents)
+
+    def test_render_providers_config_supports_azure_profile_and_shell(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            output_path = base / "providers.yaml"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "HARNESS_PROVIDER_PROFILE": "azure-devops",
+                    "HARNESS_SHELL_ENABLED": "1",
+                    "ADO_BASE_URL": "https://dev.azure.com/example-org",
+                    "ADO_PROJECT": "ExampleProject",
+                    "HARNESS_EXECUTOR_BACKEND": "codex-cli",
+                }
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(PROVIDERS_RENDER_PATH), "--output", str(output_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            contents = output_path.read_text(encoding="utf-8")
+            self.assertIn('default_provider: "azure-devops"', contents)
+            self.assertIn("family: azure-devops", contents)
+            self.assertIn("enabled: true", contents)
+
+    def test_render_providers_config_maps_legacy_acpx_backend_to_codex_acp(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            output_path = base / "providers.yaml"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "HARNESS_PROVIDER_PROFILE": "local-task",
+                    "HARNESS_EXECUTOR_BACKEND": "acpx",
+                }
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(PROVIDERS_RENDER_PATH), "--output", str(output_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            contents = output_path.read_text(encoding="utf-8")
+            self.assertIn('mode: "codex-acp"', contents)
+            self.assertIn('backend: "codex-acp"', contents)
 
     @unittest.skipUnless(NODE_PATH, "node is required")
     def test_render_codex_auth_writes_auth_json(self) -> None:

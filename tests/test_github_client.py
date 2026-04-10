@@ -66,6 +66,21 @@ class GitHubRestClientTests(unittest.TestCase):
         self.assertEqual("lusipad/ClawHarness", event.repo_id)
         self.assertEqual("reviewer", event.actor["name"])
 
+    def test_complete_task_closes_issue_and_posts_comment(self) -> None:
+        self.transport.queue_json({"number": 42, "state": "closed"})
+        self.transport.queue_json({"id": 70, "body": "done"})
+
+        response = self.client.complete_task("42", repo_id="lusipad/ClawHarness", comment="done")
+
+        self.assertEqual("closed", response["state"])
+        patch_call = self.transport.calls[0]
+        comment_call = self.transport.calls[1]
+        self.assertEqual("PATCH", patch_call["method"])
+        self.assertIn("/repos/lusipad/ClawHarness/issues/42", patch_call["url"])
+        self.assertEqual({"state": "closed"}, json.loads(patch_call["body"].decode("utf-8")))
+        self.assertEqual("POST", comment_call["method"])
+        self.assertIn("/repos/lusipad/ClawHarness/issues/42/comments", comment_call["url"])
+
     def test_normalize_check_run_failure_prefixes_ci_run_id_and_keeps_pr_link(self) -> None:
         event = self.client.normalize_event(
             event_type="check_run",
@@ -84,6 +99,27 @@ class GitHubRestClientTests(unittest.TestCase):
         self.assertEqual("ci.run.failed", event.event_type)
         self.assertEqual("check-run:201", event.ci_run_id)
         self.assertEqual("15", event.pr_id)
+
+    def test_normalize_pull_request_closed_with_merge_becomes_pr_merged(self) -> None:
+        event = self.client.normalize_event(
+            event_type="pull_request",
+            source_id="delivery-pr-merged",
+            payload={
+                "action": "closed",
+                "number": 15,
+                "pull_request": {
+                    "number": 15,
+                    "merged": True,
+                    "merge_commit_sha": "abc123",
+                },
+                "repository": {"full_name": "lusipad/ClawHarness"},
+                "sender": {"login": "reviewer", "id": 9},
+            },
+        )
+
+        self.assertEqual("pr.merged", event.event_type)
+        self.assertEqual("15", event.pr_id)
+        self.assertEqual("lusipad/ClawHarness", event.repo_id)
 
     def test_list_pull_request_comments_merges_review_and_issue_comments(self) -> None:
         self.transport.queue_json(

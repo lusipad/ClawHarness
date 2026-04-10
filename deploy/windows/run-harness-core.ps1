@@ -49,11 +49,6 @@ if (-not $codex) {
   throw "codex CLI not found on PATH."
 }
 
-$hooksToken = Set-ProcessEnvFromUser "OPENCLAW_HOOKS_TOKEN"
-if (-not $hooksToken) {
-  throw "OPENCLAW_HOOKS_TOKEN is missing. Run deploy/windows/install-openclaw.ps1 first."
-}
-
 $ingressToken = Set-ProcessEnvFromUser "HARNESS_INGRESS_TOKEN"
 if (-not $ingressToken) {
   $bytes = New-Object byte[] 32
@@ -97,7 +92,7 @@ $null = Set-ProcessEnvFromUser "HARNESS_CONTROL_TOKEN"
 $providersConfig = Resolve-ProvidersConfigPath -Root $RepoRoot
 $policyConfig = Join-Path $RepoRoot "deploy\config\harness-policy.yaml"
 $openclawConfig = Join-Path $RepoRoot "deploy\config\openclaw.json"
-$env:HARNESS_SHELL_ENABLED = "1"
+$env:HARNESS_SHELL_ENABLED = "0"
 $env:PYTHONUNBUFFERED = "1"
 
 Push-Location $RepoRoot

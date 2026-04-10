@@ -92,6 +92,23 @@ class GitHubRestClient:
             body={"body": text},
         )
 
+    def complete_task(
+        self,
+        task_id: int | str,
+        *,
+        repo_id: str | None = None,
+        comment: str | None = None,
+    ) -> dict[str, Any]:
+        repository_id = self._require_repo_id(repo_id)
+        issue = self._request_json(
+            "PATCH",
+            f"repos/{repository_id}/issues/{task_id}",
+            body={"state": "closed"},
+        )
+        if comment:
+            self.add_task_comment(task_id, comment, repo_id=repository_id)
+        return issue
+
     def get_repository(self, repository_id: str) -> RepositoryInfo:
         response = self._request_json("GET", f"repos/{repository_id}")
         return self._repository_from_mapping(response)
@@ -366,6 +383,22 @@ class GitHubRestClient:
                 pr_number = pull_request.get("number")
                 return self._event(
                     normalized_event_type="pr.comment.created",
+                    source_id=source_id,
+                    task_id=None,
+                    task_key=None,
+                    repo_id=repo_id,
+                    pr_id=pr_number,
+                    ci_run_id=None,
+                    actor=actor,
+                    payload=payload,
+                )
+
+        if event_type == "pull_request":
+            pull_request = payload.get("pull_request") if isinstance(payload.get("pull_request"), Mapping) else {}
+            if action == "closed" and bool(pull_request.get("merged")):
+                pr_number = pull_request.get("number") or payload.get("number")
+                return self._event(
+                    normalized_event_type="pr.merged",
                     source_id=source_id,
                     task_id=None,
                     task_key=None,

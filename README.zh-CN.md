@@ -2,19 +2,20 @@
 
 [English](README.md) | 简体中文
 
-ClawHarness 是一个面向 Azure DevOps 与 GitHub 仓库的自主化任务到 PR 执行闭环。它把 provider 侧任务来源、OpenClaw 执行、仓库本地校验、分支与 PR 自动化，以及可选的 Rocket.Chat 生命周期通知串成一条可重复的交付链路。
+ClawHarness 是一个本地优先的自主化任务到 PR 执行闭环。它可以先以轻量 core 形态跑本地仓库和本地任务文件，再按需叠加 Azure DevOps、GitHub、OpenClaw Shell、聊天与 bot-view。
 
 ## 功能概览
 
 - 使用基于 SQLite 的运行时存储完成任务认领、去重、加锁和审计
 - 为每次任务运行准备隔离工作区，并创建任务分支
-- 通过 OpenClaw 或本地 Codex CLI 后端调用 Codex 完成实现工作
+- 默认通过本地 Codex CLI 调用 Codex，也支持按需接入 OpenClaw Shell
 - 在提交和推送前执行本地检查
 - 自动创建 PR，并为每次运行保留审计记录
 - 支持通过 webhook 继续处理 PR 反馈和 CI 故障恢复
 - 支持 Azure DevOps 与 GitHub 的 provider-neutral 路由
 - 支持离线 `local-task` 模式，可直接消费本地仓库、本地任务文件和本地 review 工件
 - 支持导出可搬运部署包，并提供 `load-images` / `up-offline` 脚本用于无外网环境
+- 内置 GitHub Actions 安装包工作流，可产出在线安装包，并按需附带离线镜像归档
 - 提供 Windows、Linux systemd 和 Docker 部署资产
 
 ## 仓库结构
@@ -34,8 +35,14 @@ ClawHarness 是一个面向 Azure DevOps 与 GitHub 仓库的自主化任务到 
 
 ## 文档索引
 
+- `docs/system-architecture.md`：V3 系统架构总览、运行时分层与部署拓扑
 - `deploy/README.md`：部署方式、配置项与运维说明
+- `docs/plugin-architecture.md`：plugin、skill、workflow 与 runtime 边界摘要
+- `docs/plugin-boundary.md`：职责归属与维护边界规则
+- `docs/plugin-skill-workflow-boundary.md`：skill / workflow / capability 详细边界说明
 - `skills/README.md`：canonical skill 归属与投影说明
+- `.omx/plans/prd-clawharness-v3-2026-04-09.md`：V3 本地优先 / 插件化 / 轻量化产品定义
+- `.omx/plans/test-spec-clawharness-v3-2026-04-09.md`：V3 验收标准与验证门槛
 - `.omx/plans/prd-clawharness-v2-2026-04-05.md`：V2 产品定义与范围
 - `.omx/plans/test-spec-clawharness-v2-2026-04-05.md`：V2 验收标准与测试门槛
 - `.omx/plans/evidence-clawharness-v2-2026-04-06.md`：最新 V2 真实验收证据
@@ -44,7 +51,10 @@ ClawHarness 是一个面向 Azure DevOps 与 GitHub 仓库的自主化任务到 
 ## 当前状态
 
 - 最新本地验证结果：
-  `python -m unittest discover -s tests -v` -> `160/160` 通过
+  `python -m unittest discover -s tests -v` -> `175/175` 通过
+- 最新结构化验证结果：
+  `python -m compileall ado_client codex_acp_runner github_client harness_runtime local_client rocketchat_notifier run_store workflow_provider tests deploy/package deploy/windows` -> 通过
+- V3 的本地优先 / 插件化 / 可选 Shell 基线已经完成，并通过 architect 复核
 - Azure DevOps 的 task -> branch -> PR 真实闭环已经跑通
 - 同父 run 的 PR feedback 恢复已经真实跑通
 - 同父 run 的 CI recovery 已完成真实端到端闭环：
@@ -69,13 +79,14 @@ ClawHarness 是一个面向 Azure DevOps 与 GitHub 仓库的自主化任务到 
 
 ## 当前推荐用法
 
-- 默认优先使用 Docker 部署
-- 如果你现在就要走真实闭环，优先选 Azure DevOps
-- 如果你想在浏览器里看 OpenClaw 和 ClawHarness 的运行状态，建议同时开启可选的 `bot-view` profile
-- 如果你要启用可交互的 `bot-view` 控制面，请设置 `HARNESS_CONTROL_TOKEN`；如果要把只读和控制分权，再额外设置 `HARNESS_API_TOKEN` 或 `HARNESS_READONLY_TOKEN`
-- GitHub 当前可把“Windows issue -> PR stdin 重跑链路”视为已真实验证，但 PR feedback 与 checks recovery 仍应按“待补更广泛 webhook 验证”对外表述
+- 默认优先使用 Docker 的 core-only 栈
+- 默认保持 `HARNESS_PROVIDER_PROFILE=local-task`
+- 只有在需要 OpenClaw UI、聊天宿主或 bot-view 时才开启 `--profile shell`
+- 如果还需要 dashboard sidecar，则开启 `--profile shell --profile bot-view`
+- 如果你要启用可交互的 bot-view 控制面，请设置 `HARNESS_CONTROL_TOKEN`；如果要把只读和控制分权，再额外设置 `HARNESS_API_TOKEN` 或 `HARNESS_READONLY_TOKEN`
+- 远端 provider 里，Azure DevOps 仍是当前最完整的真实验收路径
 
-## 当前 V2 交付能力
+## 当前交付能力
 
 - bridge 现在已经提供只读运行态 API，可查询 run 汇总、run 列表、run 详情、审计时间线和 run graph
 - bridge 现在还提供了受控的 `POST /api/runs/<run_id>/command`，可审计地执行 `pause`、`resume`、`add-context`、`escalate`
@@ -99,32 +110,74 @@ ClawHarness 是一个面向 Azure DevOps 与 GitHub 仓库的自主化任务到 
 
 ## 最快启动路径
 
+在 Windows 上，最短路径是：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/windows/bootstrap.ps1 -OpenAiApiKey <your-key>
+```
+
+如果你更希望走简化后的交互式安装向导，可以直接运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/windows/bootstrap.ps1 -Interactive
+```
+
+现在在交互式 PowerShell 里直接运行 `deploy/windows/bootstrap.ps1`，也会自动进入快速向导。
+向导在真正写入配置前会先展示安装摘要，结束后会自动执行一次安装检查。
+
+如果你确实需要原生安装、更多目录项或完整高级参数，再使用：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/windows/bootstrap.ps1 -Interactive -Advanced
+```
+
+这个统一安装器还支持：
+`-InstallMode docker`、`-InstallMode native-core`、`-InstallMode native-openclaw`。
+如果本机还没装 Docker Desktop，可追加 `-InstallDocker`。
+如果你只想先生成 `.env`、数据目录和 token，而不立刻启动容器，可追加 `-SkipStart`。
+如果你想顺手生成一个本地离线任务示例文件，可追加 `-CreateSampleTask`。
+安装或配置完成后，可用下面的命令检查当前模式是否已经准备完整：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/windows/check-install.ps1 -InstallMode docker
+```
+
+如果你部署的是原生模式，把 `docker` 改成 `native-core` 或 `native-openclaw` 即可。
+当前默认 Docker 打包方式仍是“单机单实例”，因为 compose 使用了固定容器名。
+
 1. 把 `deploy/docker/.env.example` 复制成 `deploy/docker/.env`
-2. 至少填写这些变量：
-   `ADO_BASE_URL`、`ADO_PROJECT`、`ADO_PAT`、`OPENAI_API_KEY`、`OPENCLAW_GATEWAY_TOKEN`、`OPENCLAW_HOOKS_TOKEN`、`HARNESS_INGRESS_TOKEN`、`CODEX_MODEL`
-3. 启动服务栈：
+2. 保持 `HARNESS_PROVIDER_PROFILE=local-task`
+3. 至少填写这些变量：
+   `OPENAI_API_KEY`、`LOCAL_REPO_PATH`、`LOCAL_TASKS_PATH`、`LOCAL_REVIEW_PATH`
+4. 启动 core-only 服务栈：
 
 ```sh
 docker compose --env-file deploy/docker/.env -f deploy/docker/compose.yml up --build -d
 ```
 
-4. 如果还想要 dashboard sidecar，再执行：
+5. 如果还想叠加 OpenClaw Shell：
 
 ```sh
-docker compose --profile bot-view --env-file deploy/docker/.env -f deploy/docker/compose.yml up --build -d
+docker compose --profile shell --env-file deploy/docker/.env -f deploy/docker/compose.yml up --build -d
+```
+
+6. 如果还想要 dashboard sidecar，再执行：
+
+```sh
+docker compose --profile shell --profile bot-view --env-file deploy/docker/.env -f deploy/docker/compose.yml up --build -d
 ```
 
 如果希望 dashboard 支持交互控制，请同时设置 `HARNESS_CONTROL_TOKEN`。
 如果只想暴露只读 dashboard，可设置 `HARNESS_API_TOKEN` 或 `HARNESS_READONLY_TOKEN`。
 当只配置了 `HARNESS_CONTROL_TOKEN` 时，sidecar 的只读代理现在也会自动回退使用它。
 
-5. 具体运维和配置细节看 `deploy/README.md`
+7. 具体运维和配置细节看 `deploy/README.md`
 
 ## 离线模式
 
-如果目标环境不方便接 Azure DevOps 或 GitHub，ClawHarness 现在支持 `local-task` 本地闭环：
+如果目标环境不方便接 Azure DevOps 或 GitHub，ClawHarness 现在默认就是 `local-task` 本地闭环：
 
-- 把 `deploy/config/providers.yaml` 切到 `local-task` 示例
+- 保持 `deploy/config/providers.yaml` 默认配置不变
 - 配置 `LOCAL_REPO_PATH`、`LOCAL_TASKS_PATH`、`LOCAL_REVIEW_PATH`
 - 用本地任务文件触发一次运行
 
@@ -156,12 +209,45 @@ docker save -o clawharness-images.tar \
 
 3. 将部署包和 `clawharness-images.tar` 一起复制到目标机器，先执行 `load-images`，再执行 `up-offline`。
 
+如果目标机器是 Windows，也可以直接运行：
+
+```powershell
+./bootstrap.ps1 -OpenAiApiKey <your-key>
+```
+
+然后再执行：
+
+```powershell
+./check-install.ps1 -InstallMode docker
+```
+
+## GitHub Actions 安装包
+
+仓库现在内置了 [`.github/workflows/package-installers.yml`](.github/workflows/package-installers.yml)，用于在 CI 中产出可下载安装包。
+
+- 推送到 `main`，或推送匹配 `v*` 的 tag 时，会自动生成在线安装包 artifact。
+- 推送匹配 `v*` 的 tag 时，还会自动构建离线 Docker 镜像归档，并把打包结果直接挂到该 tag 对应的 GitHub Release。
+- 手动触发 `workflow_dispatch` 时，如果把 `include_offline_images` 设为 `true`，还会额外构建并附带离线 Docker 镜像归档。
+- 打包结果会包含：
+  `clawharness-deploy-<label>.zip`、
+  `SHA256SUMS-<label>.txt`、
+  `artifact-manifest-<label>.json`，
+  如果启用了离线镜像，则还会包含 `clawharness-images-<label>.tar`。
+
+如果你要在本地复现与 CI 相同的打包流程，可执行：
+
+```sh
+python deploy/package/package_release_assets.py --output dist/github-actions --label local --force
+python deploy/package/package_release_assets.py --output dist/github-actions --label local --image-archive clawharness-images.tar --force
+```
+
 ## 快速开始
 
 1. 先配置任务 provider 所需环境变量。
-   如果使用 Azure DevOps，填写 `ADO_BASE_URL`、`ADO_PROJECT`、`ADO_PAT`。
-   如果使用 GitHub，把 `deploy/config/providers.yaml` 切到 GitHub 配置，并填写 `GITHUB_TOKEN`。
-   两种模式都需要填写 `OPENCLAW_HOOKS_TOKEN` 与 `OPENCLAW_GATEWAY_TOKEN`。
+   如果走本地优先，直接使用默认 `deploy/config/providers.yaml`。
+   如果使用 Azure DevOps，可改用 `deploy/config/providers.azure-devops.yaml`，或把 `HARNESS_PROVIDER_PROFILE` 设为 `azure-devops`。
+   如果使用 GitHub，可改用 `deploy/config/providers.github.yaml`，或把 `HARNESS_PROVIDER_PROFILE` 设为 `github`。
+   只有启用 shell 的部署才需要填写 `OPENCLAW_HOOKS_TOKEN` 与 `OPENCLAW_GATEWAY_TOKEN`。
 2. 阅读 `deploy/README.md` 选择部署方式。
 3. 按目标环境运行 Windows 安装脚本，或者使用 Docker / systemd 资产。
 4. 运行自动化检查：
@@ -174,7 +260,7 @@ python -m compileall ado_client codex_acp_runner github_client harness_runtime l
 5. 手工触发一次任务运行：
 
 ```sh
-python -m harness_runtime.main --task-id <task-id> --repo-id <repo-id> [--provider-type github]
+python -m harness_runtime.main --provider-type local-task --task-id <task-id>
 ```
 
 ## 验证范围

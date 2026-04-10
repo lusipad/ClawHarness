@@ -16,6 +16,7 @@ COPY codex_acp_runner /app/codex_acp_runner
 COPY deploy/docker /app/deploy/docker
 COPY github_client /app/github_client
 COPY harness_runtime /app/harness_runtime
+COPY local_client /app/local_client
 COPY openclaw-plugin /app/openclaw-plugin
 COPY rocketchat_notifier /app/rocketchat_notifier
 COPY run_store /app/run_store

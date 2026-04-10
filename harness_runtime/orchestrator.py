@@ -65,6 +65,10 @@ class TaskRunOrchestrator:
         self.shell_runner = shell_runner or self._default_shell_runner
         self.skill_registry = skill_registry or load_default_skill_registry()
 
+    def _is_failing_check(self, check: Mapping[str, Any]) -> bool:
+        status = str(check.get("status") or "").strip().lower()
+        return status in {"failed", "failure", "error", "blocked", "needs_human", "timed_out", "timeout"}
+
     def claim_manual_task(
         self,
         *,
@@ -444,7 +448,7 @@ class TaskRunOrchestrator:
                 artifact_name="verifier-checks",
                 payload={"checks": all_checks},
             )
-            failed_checks = [item for item in all_checks if item.get("status") != "passed"]
+            failed_checks = [item for item in all_checks if self._is_failing_check(item)]
             self._record_checkpoint(
                 verifier_child.run_id,
                 "verification",
@@ -689,7 +693,7 @@ class TaskRunOrchestrator:
                 artifact_name="pr-feedback-checks",
                 payload={"checks": all_checks},
             )
-            failed_checks = [item for item in all_checks if item.get("status") != "passed"]
+            failed_checks = [item for item in all_checks if self._is_failing_check(item)]
             self._record_checkpoint(
                 current.run_id,
                 "verification",
@@ -912,7 +916,7 @@ class TaskRunOrchestrator:
                 artifact_name="ci-recovery-checks",
                 payload={"checks": all_checks},
             )
-            failed_checks = [item for item in all_checks if item.get("status") != "passed"]
+            failed_checks = [item for item in all_checks if self._is_failing_check(item)]
             self._record_checkpoint(
                 current.run_id,
                 "verification",

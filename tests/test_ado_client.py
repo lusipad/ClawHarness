@@ -105,6 +105,23 @@ class AzureDevOpsRestClientTests(unittest.TestCase):
         self.assertIn("api-version=7.0-preview.3", call["url"])
         self.assertEqual({"text": "hello"}, json.loads(call["body"].decode("utf-8")))
 
+    def test_complete_task_updates_state_and_posts_comment(self) -> None:
+        self.transport.queue_json({"id": 123, "fields": {"System.State": "Done"}})
+        self.transport.queue_json({"id": 50, "text": "done"})
+
+        response = self.client.complete_task(123, comment="done")
+
+        self.assertEqual("Done", response["fields"]["System.State"])
+        patch_call = self.transport.calls[0]
+        comment_call = self.transport.calls[1]
+        self.assertEqual("PATCH", patch_call["method"])
+        self.assertEqual(
+            [{"op": "add", "path": "/fields/System.State", "value": "Done"}],
+            json.loads(patch_call["body"].decode("utf-8")),
+        )
+        self.assertEqual("POST", comment_call["method"])
+        self.assertIn("/_apis/wit/workItems/123/comments?", comment_call["url"])
+
     def test_create_pull_request_builds_expected_payload(self) -> None:
         self.transport.queue_json({"pullRequestId": 42})
 
@@ -308,6 +325,24 @@ class AzureDevOpsRestClientTests(unittest.TestCase):
         self.assertEqual("AB#123", normalized.task_key)
         self.assertEqual("repo-1", normalized.repo_id)
         self.assertEqual({"id": "user-1", "name": "Alice"}, normalized.actor)
+
+    def test_normalize_event_maps_completed_pull_request_to_pr_merged(self) -> None:
+        normalized = self.client.normalize_event(
+            event_type="git.pullrequest.updated",
+            source_id="evt-pr-merged",
+            payload={
+                "resource": {
+                    "pullRequestId": 42,
+                    "status": "completed",
+                    "mergeStatus": "succeeded",
+                    "repository": {"id": "repo-1"},
+                }
+            },
+        )
+
+        self.assertEqual("pr.merged", normalized.event_type)
+        self.assertEqual("42", normalized.pr_id)
+        self.assertEqual("repo-1", normalized.repo_id)
 
     def test_authorization_header_uses_basic_pat(self) -> None:
         self.transport.queue_json({"id": 123})

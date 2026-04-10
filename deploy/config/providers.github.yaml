@@ -1,0 +1,43 @@
+providers:
+  task_pr_ci:
+    default_provider: github
+    github:
+      family: github
+      mode: github-rest
+      base_url: https://api.github.com
+      auth:
+        type: token
+        secret_env: GITHUB_TOKEN
+      events:
+        mode: webhook
+        webhook_secret_env: GITHUB_WEBHOOK_SECRET
+
+  chat:
+    family: rocketchat
+    mode: rocketchat-webhook
+    room: ai-dev
+    webhook_url_env: RC_WEBHOOK_URL
+    command_token_env: RC_COMMAND_TOKEN
+
+  executor:
+    family: codex
+    mode: codex-cli
+    harness: codex
+    backend: codex-cli
+    runtime:
+      timeout_seconds: 3600
+
+runtime:
+  shell:
+    enabled: false
+  storage:
+    kind: sqlite
+    path: ~/.openclaw/harness/harness.db
+  workspace_root: ~/.openclaw/workspace/harness
+  branch_prefix: ai
+  owner: harness-bridge
+  lock_ttl_seconds: 1800
+  dedupe_ttl_seconds: 86400
+  audit_retention_days: 30
+  terminal_run_retention_days: 30
+  cleanup_batch_size: 50

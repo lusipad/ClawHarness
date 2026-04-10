@@ -1,7 +1,7 @@
 # ClawHarness 插件边界与 Skill 所有权
 
 日期：2026-04-09
-状态：执行中架构基线
+状态：V3 已完成基线
 
 ## 目标
 
@@ -73,8 +73,9 @@
 - `harness_runtime/capabilities/`
 - `harness_runtime/capability_registry.py`
 - `harness_runtime/provider_factories.py`
+- `harness_runtime/runtime_factories.py`
 
-这里定义 capability manifest 与内建 provider 的注册入口。
+这里定义 capability manifests 与内建 task-provider / executor / notifier 的注册入口。
 
 ### workflow references
 
@@ -92,13 +93,15 @@
 
 ## 当前实现边界
 
-- 任务 provider 已经通过 manifest-driven capability registry 进入运行时。
+- 默认运行路径已经收敛为 `local-task + codex-cli + shell disabled`
+- OpenClaw Shell 现在是 UI/chat/bot-view 的可选叠加层，而不是 core 硬依赖
+- 任务 provider、executor、notifier 已经通过 manifest-driven capability registry 进入运行时。
 - OpenClaw 技能目录已经转为 compatibility mirror。
 - flow 文件已经降级为 orchestration references。
 - `harness_runtime/` 继续承担主状态机、恢复、审计和执行编排。
 
 ## 后续约束
 
-- 如果后续要增加 chat、ui、review publisher 等 capability，也应走同一套 registry/manifest 模型。
+- 如果后续要增加 chat、ui、review publisher 等 capability，也应继续走同一套 registry/manifest 模型。
 - 新 capability 可以扩展系统能力，但不能复制 canonical skill source。
 - 新文档、部署说明与运维手册都要继续沿用这个分层，不再把 `openclaw-plugin/skills` 描述成系统真源。

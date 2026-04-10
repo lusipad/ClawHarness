@@ -11,7 +11,14 @@ from workflow_provider import WorkflowProviderClient
 from .config import HarnessRuntimeConfig
 
 
-CapabilityFactory = Callable[[HarnessRuntimeConfig], WorkflowProviderClient | None]
+CapabilityFactory = Callable[["RuntimeCapabilityContext"], object | None]
+
+
+@dataclass(frozen=True)
+class RuntimeCapabilityContext:
+    config: HarnessRuntimeConfig
+    openclaw_client: Any | None = None
+    gateway_tool_client: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +60,14 @@ class CapabilityRegistry:
         return cls.from_payload(payload)
 
     @classmethod
+    def from_paths(cls, paths: list[str | Path] | tuple[str | Path, ...]) -> "CapabilityRegistry":
+        definitions: list[CapabilityDefinition] = []
+        for path in paths:
+            registry = cls.from_path(path)
+            definitions.extend(registry.definitions)
+        return cls(tuple(definitions))
+
+    @classmethod
     def from_payload(cls, payload: Any) -> "CapabilityRegistry":
         if not isinstance(payload, Mapping):
             raise CapabilityRegistryError("Capability manifest root must be a JSON object")
@@ -81,14 +96,22 @@ class CapabilityRegistry:
         normalized = capability_type.strip().lower()
         return tuple(item for item in self.definitions if item.capability_type.strip().lower() == normalized)
 
-    def instantiate_task_providers(self, config: HarnessRuntimeConfig) -> dict[str, WorkflowProviderClient]:
-        providers: dict[str, WorkflowProviderClient] = {}
-        for definition in self.capabilities_for("task-provider"):
-            instance = definition.load_factory()(config)
+    def instantiate_capabilities(
+        self,
+        capability_type: str,
+        context: RuntimeCapabilityContext,
+    ) -> dict[str, object]:
+        instances: dict[str, object] = {}
+        for definition in self.capabilities_for(capability_type):
+            instance = definition.load_factory()(context)
             if instance is None:
                 continue
-            providers[definition.capability_id] = instance
-        return providers
+            instances[definition.capability_id] = instance
+        return instances
+
+    def instantiate_task_providers(self, config: HarnessRuntimeConfig) -> dict[str, WorkflowProviderClient]:
+        providers = self.instantiate_capabilities("task-provider", RuntimeCapabilityContext(config=config))
+        return {key: value for key, value in providers.items() if isinstance(value, WorkflowProviderClient)}
 
 
 def default_capability_manifest_path(repo_root: str | Path | None = None) -> Path:
@@ -96,8 +119,17 @@ def default_capability_manifest_path(repo_root: str | Path | None = None) -> Pat
     return root / "capabilities" / "builtin-task-providers.json"
 
 
+def default_capability_manifest_paths(repo_root: str | Path | None = None) -> tuple[Path, ...]:
+    root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parent
+    capability_dir = root / "capabilities"
+    manifests = sorted(capability_dir.glob("builtin-*.json"))
+    if not manifests:
+        return (default_capability_manifest_path(repo_root),)
+    return tuple(manifests)
+
+
 def load_default_capability_registry(repo_root: str | Path | None = None) -> CapabilityRegistry:
-    return CapabilityRegistry.from_path(default_capability_manifest_path(repo_root))
+    return CapabilityRegistry.from_paths(default_capability_manifest_paths(repo_root))
 
 
 def _require_string(mapping: Mapping[str, Any], key: str) -> str:

@@ -1,0 +1,44 @@
+providers:
+  task_pr_ci:
+    default_provider: azure-devops
+    azure_devops:
+      family: azure-devops
+      mode: ado-rest
+      base_url: ${ADO_BASE_URL}
+      project: ${ADO_PROJECT}
+      auth:
+        type: pat
+        secret_env: ADO_PAT
+      events:
+        mode: webhook
+        webhook_secret_env: ADO_WEBHOOK_SECRET
+
+  chat:
+    family: rocketchat
+    mode: rocketchat-webhook
+    room: ai-dev
+    webhook_url_env: RC_WEBHOOK_URL
+    command_token_env: RC_COMMAND_TOKEN
+
+  executor:
+    family: codex
+    mode: codex-cli
+    harness: codex
+    backend: codex-cli
+    runtime:
+      timeout_seconds: 3600
+
+runtime:
+  shell:
+    enabled: false
+  storage:
+    kind: sqlite
+    path: ~/.openclaw/harness/harness.db
+  workspace_root: ~/.openclaw/workspace/harness
+  branch_prefix: ai
+  owner: harness-bridge
+  lock_ttl_seconds: 1800
+  dedupe_ttl_seconds: 86400
+  audit_retention_days: 30
+  terminal_run_retention_days: 30
+  cleanup_batch_size: 50

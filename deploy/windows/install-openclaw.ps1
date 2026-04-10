@@ -9,7 +9,12 @@ $ErrorActionPreference = "Stop"
 
 function New-RandomHex([int]$ByteCount = 32) {
   $bytes = New-Object byte[] $ByteCount
-  [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+  $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $rng.GetBytes($bytes)
+  } finally {
+    $rng.Dispose()
+  }
   return -join ($bytes | ForEach-Object { $_.ToString("x2") })
 }
 
