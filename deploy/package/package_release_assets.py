@@ -39,6 +39,14 @@ def write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def normalized_archive_suffix(path: Path) -> str:
+    lower_name = path.name.lower()
+    for suffix in (".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst"):
+        if lower_name.endswith(suffix):
+            return suffix
+    return path.suffix or ".tar"
+
+
 def package_release_assets(output_dir: Path, label: str, image_archive: Path | None, force: bool) -> dict[str, object]:
     if output_dir.exists():
         if not force:
@@ -62,7 +70,7 @@ def package_release_assets(output_dir: Path, label: str, image_archive: Path | N
     if image_archive is not None:
         if not image_archive.is_file():
             raise FileNotFoundError(f"Offline image archive not found: {image_archive}")
-        suffix = "".join(image_archive.suffixes) or image_archive.suffix or ".tar"
+        suffix = normalized_archive_suffix(image_archive)
         copied_image_archive = archives_dir / f"clawharness-images-{label}{suffix}"
         shutil.copy2(image_archive, copied_image_archive)
         files.append(copied_image_archive)

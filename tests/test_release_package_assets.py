@@ -66,6 +66,23 @@ class ReleasePackageAssetTests(unittest.TestCase):
             self.assertEqual(b"offline-image-archive", copied_archive.read_bytes())
             self.assertIn("clawharness-images-offline.tar.gz", checksum_file.read_text(encoding="utf-8"))
 
+    def test_package_release_assets_keeps_tar_gz_suffix_for_version_like_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "release"
+            offline_archive = Path(temp_dir) / "clawharness-images-v3.0.0-alpha.2.tar.gz"
+            offline_archive.write_bytes(b"offline-image-archive")
+
+            result = package_release_assets.package_release_assets(
+                output_dir=output_dir,
+                label="v3.0.0-alpha.2",
+                image_archive=offline_archive,
+                force=False,
+            )
+
+            copied_archive = output_dir / "artifacts" / "clawharness-images-v3.0.0-alpha.2.tar.gz"
+            self.assertEqual(copied_archive, result["offline_image_archive"])
+            self.assertTrue(copied_archive.is_file())
+
     def test_cli_entrypoint_supports_script_execution(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir) / "release"
